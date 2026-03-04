@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'home_screen.dart'; // Importamos la home para poder navegar a ella
+import 'home_screen.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -9,12 +10,20 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // Controladores para capturar el texto
+  // Controladores de texto
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   // Variable para ocultar/mostrar contraseña
   bool _isObscure = true;
+
+  // ¡Buena práctica! Liberar memoria cuando la pantalla se cierra
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 1. Icono representativo de familia (Kindu)
+              // 1. Logo
               const Icon(
                 Icons.family_restroom_rounded,
                 size: 100,
@@ -34,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 10),
               
-              // 2. Título principal
+              // 2. Títulos
               const Text(
                 'Kindu',
                 style: TextStyle(
@@ -87,13 +96,13 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 30),
 
-              // 5. Botón de Entrar (Navegación directa por ahora)
+              // 5. Botón de Entrar -> Va a HomeScreen
               SizedBox(
                 width: double.infinity,
                 height: 55,
                 child: ElevatedButton(
                   onPressed: () {
-                    // Navegamos a la Home al pulsar
+                    // Navegación directa a la Home
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const HomeScreen()),
@@ -118,11 +127,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 20),
 
-              // 6. Enlace a Registro
+              // 6. Botón de Registro -> Va a RegisterScreen
               TextButton(
                 onPressed: () {
-                  // Aquí conectaremos la pantalla de registro más adelante
-                  print("Ir a registro");
+                  // Navegación a la pantalla de Registro
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const RegisterScreen()),
+                  );
                 },
                 child: const Text(
                   '¿Aún no tienes cuenta? Regístrate aquí',
