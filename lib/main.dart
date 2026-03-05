@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/login_screen.dart'; // Importamos tu nuevo login
 
 void main() {
+  // Arrancamos la interfaz visual directamente
   runApp(const KinduApp());
 }
 
