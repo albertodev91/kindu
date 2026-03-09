@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/pdf_service.dart';
+import '../services/excel_service.dart';
 
 // --- NUEVA CLASE PARA EL CHAT DE DISPUTAS ---
 class MensajeDisputa {
@@ -47,6 +48,9 @@ class Gasto {
   
   String metodoPago;
 
+  // AUDITORÍA: Historial de cambios para trazabilidad legal
+  final List<String> historialModificaciones;
+
   Gasto({
     required this.titulo,
     required this.total,
@@ -72,6 +76,7 @@ class Gasto {
     this.esDevolucion = false,
     this.comprobantePago,
     this.creadorDisputa, // Inicializado
+    this.historialModificaciones = const [],
   }) : hiloDisputa = hiloDisputa ?? []; 
 
   bool get estaPagado => cantidadPagada >= miParte;
@@ -94,7 +99,7 @@ class _FinanceTabState extends State<FinanceTab> {
 
   final String miNombreReal = 'Alberto'; 
   final String nombreOtroProgenitor = 'Yaiza'; 
-  final List<String> misHijos = ['Hugo', 'Martina']; 
+  final List<String> misHijos = ['Viggo', 'Ivy']; 
 
   List<Gasto> listaGastos = [];
 
@@ -103,24 +108,24 @@ class _FinanceTabState extends State<FinanceTab> {
     super.initState();
     listaGastos = [
       Gasto(
-        titulo: 'Dentista Martina', total: 120.0, miParte: 60.0, porcentaje: 50.0, soyDeudor: false, creador: miNombreReal, 
-        categoria: 'Salud', fecha: DateTime.now().subtract(const Duration(days: 1)), esRecurrente: false, esExtraordinario: true, ninosAsignados: ['Martina'], cantidadPagada: 20.0, 
+        titulo: 'Dentista Ivy', total: 120.0, miParte: 60.0, porcentaje: 50.0, soyDeudor: false, creador: miNombreReal, 
+        categoria: 'Salud', fecha: DateTime.now().subtract(const Duration(days: 1)), esRecurrente: false, esExtraordinario: true, ninosAsignados: ['Ivy'], cantidadPagada: 20.0, 
       ),
       Gasto(
         titulo: 'Zapatillas Marca', total: 80.0, miParte: 40.0, porcentaje: 50.0, soyDeudor: false, creador: miNombreReal, 
-        categoria: 'Ropa', fecha: DateTime.now().subtract(const Duration(days: 2)), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Hugo'], enDisputa: true, 
+        categoria: 'Ropa', fecha: DateTime.now().subtract(const Duration(days: 2)), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Viggo'], enDisputa: true, 
         creadorDisputa: 'Yaiza', // Precargamos a Yaiza como creadora de la queja
         hiloDisputa: [MensajeDisputa(autor: 'Yaiza', texto: 'No acordamos comprar zapatillas tan caras. Te pago 20€ como si fueran del Decathlon.', fecha: DateTime.now())]
       ),
       Gasto(
         titulo: 'Academia Inglés', total: 50.0, miParte: 16.5, porcentaje: 33.0, soyDeudor: true, creador: nombreOtroProgenitor, 
-        categoria: 'Educación', fecha: DateTime.now().subtract(const Duration(days: 5)), esRecurrente: true, esExtraordinario: false, ninosAsignados: ['Hugo', 'Martina'],
+        categoria: 'Educación', fecha: DateTime.now().subtract(const Duration(days: 5)), esRecurrente: true, esExtraordinario: false, ninosAsignados: ['Viggo', 'Ivy'],
         fechaLimite: DateTime.now().add(const Duration(days: 3)) 
       ),
       // --- CASO DE PRUEBA PARA VALIDACIÓN ---
       Gasto(
         titulo: 'Prueba Validación', total: 100.0, miParte: 50.0, porcentaje: 50.0, soyDeudor: false, creador: miNombreReal, // Tú eres el acreedor
-        categoria: 'Ocio', fecha: DateTime.now(), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Hugo'],
+        categoria: 'Ocio', fecha: DateTime.now(), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Viggo'],
         pagoPendienteValidacion: 50.0, // <--- AQUÍ ESTÁ EL DINERO EN EL LIMBO
       ),
     ];
@@ -171,7 +176,7 @@ class _FinanceTabState extends State<FinanceTab> {
                 ),
                 const SizedBox(height: 15),
                 DropdownButtonFormField<String>(
-                  value: metodoSeleccionado,
+                  initialValue: metodoSeleccionado,
                   decoration: const InputDecoration(labelText: 'Método de pago', border: OutlineInputBorder(), prefixIcon: Icon(Icons.account_balance_wallet)),
                   items: ['Bizum', 'Transferencia', 'Efectivo'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
                   onChanged: (val) { setModalState(() { metodoSeleccionado = val!; }); },
@@ -290,7 +295,140 @@ class _FinanceTabState extends State<FinanceTab> {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gasto eliminado'), backgroundColor: Colors.redAccent));
   }
 
-  void _abrirMenuExportacionPDF() {
+  // --- NUEVA LÓGICA: LIQUIDACIÓN AVANZADA (BATCH PAYMENT) ---
+  void _abrirLiquidacionAvanzada() {
+    // 1. Filtramos solo MIS deudas pendientes (donde yo soy el deudor)
+    List<int> indicesDeudas = [];
+    for (int i = 0; i < listaGastos.length; i++) {
+      final g = listaGastos[i];
+      // Si soy deudor, no está pagado y no está en disputa
+      // CORRECCIÓN: Restamos también lo que está pendiente de validar para no pagar doble
+      double deudaReal = g.miParte - g.cantidadPagada - g.pagoPendienteValidacion;
+      if (g.soyDeudor && !g.estaPagado && !g.enDisputa && deudaReal > 0.01) {
+        indicesDeudas.add(i);
+      }
+    }
+
+    if (indicesDeudas.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No tienes pagos pendientes que realizar.'), backgroundColor: Colors.green));
+      return;
+    }
+
+    // Estado temporal para el modal
+    List<int> seleccionados = List.from(indicesDeudas); // Por defecto todos seleccionados
+    String metodoPago = 'Bizum';
+    String? rutaJustificante;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            double totalSeleccionado = 0.0;
+            for (var idx in seleccionados) {
+              // CORRECCIÓN: El total a pagar descuenta lo que ya está en el limbo (pendiente de validar)
+              totalSeleccionado += (listaGastos[idx].miParte - listaGastos[idx].cantidadPagada - listaGastos[idx].pagoPendienteValidacion);
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, top: 20, left: 20, right: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Liquidar Deuda Acumulada', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
+                  const SizedBox(height: 5),
+                  const Text('Selecciona los gastos que vas a pagar ahora:', style: TextStyle(color: Colors.grey)),
+                  const Divider(),
+                  
+                  // LISTA DE DEUDAS (Max height para que no ocupe toda la pantalla)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 200),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: indicesDeudas.length,
+                      itemBuilder: (ctx, i) {
+                        final indexReal = indicesDeudas[i];
+                        final gasto = listaGastos[indexReal];
+                        final pendiente = gasto.miParte - gasto.cantidadPagada - gasto.pagoPendienteValidacion;
+                        final isSelected = seleccionados.contains(indexReal);
+
+                        return CheckboxListTile(
+                          value: isSelected,
+                          activeColor: Colors.teal,
+                          title: Text(gasto.titulo, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                          subtitle: Text('${_formatearFecha(gasto.fecha)} | ${gasto.categoria}'),
+                          secondary: Text('${pendiente.toStringAsFixed(2)}€', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          onChanged: (val) {
+                            setModalState(() {
+                              if (val == true) { seleccionados.add(indexReal); } else { seleccionados.remove(indexReal); }
+                            });
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const Divider(),
+                  
+                  // RESUMEN Y FORMA DE PAGO
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total a Pagar:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), Text('${totalSeleccionado.toStringAsFixed(2)} €', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.teal))]),
+                  const SizedBox(height: 15),
+                  
+                  DropdownButtonFormField<String>(
+                    initialValue: metodoPago,
+                    decoration: const InputDecoration(labelText: 'Método de pago realizado', border: OutlineInputBorder(), prefixIcon: Icon(Icons.payment), isDense: true),
+                    items: ['Bizum', 'Transferencia', 'Efectivo'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                    onChanged: (val) { setModalState(() { metodoPago = val!; }); },
+                  ),
+                  const SizedBox(height: 10),
+                  
+                  OutlinedButton.icon(
+                    onPressed: () async { final XFile? foto = await ImagePicker().pickImage(source: ImageSource.gallery); if (foto != null) { setModalState(() { rutaJustificante = foto.path; }); } },
+                    icon: Icon(rutaJustificante != null ? Icons.check_circle : Icons.camera_alt, color: rutaJustificante != null ? Colors.green : Colors.blueGrey),
+                    label: Text(rutaJustificante != null ? 'Justificante Adjuntado' : 'Subir Justificante del Pago Total'),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 45)),
+                  ),
+                  
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity, height: 50,
+                    child: ElevatedButton(
+                      onPressed: totalSeleccionado > 0 ? () {
+                        // APLICAR PAGO A TODOS LOS SELECCIONADOS
+                        setState(() {
+                          for (var idx in seleccionados) {
+                            final gasto = listaGastos[idx];
+                            final deuda = _redondear(gasto.miParte - gasto.cantidadPagada - gasto.pagoPendienteValidacion);
+                            
+                            // Actualizamos el gasto como si fuera un pago individual
+                            gasto.metodoPago = metodoPago;
+                            if (rutaJustificante != null) gasto.comprobantePago = rutaJustificante;
+                            
+                            // Como soy deudor, va a validación
+                            // CORRECCIÓN FINAL: Sumamos a lo que ya pudiera haber pendiente, no lo sobrescribimos
+                            gasto.pagoPendienteValidacion = _redondear(gasto.pagoPendienteValidacion + deuda);
+                          }
+                        });
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Se han registrado ${seleccionados.length} pagos pendientes de validar.'), backgroundColor: Colors.teal));
+                      } : null,
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                      child: Text('Pagar ${totalSeleccionado.toStringAsFixed(2)}€ y Liquidar'),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            );
+          }
+        );
+      }
+    );
+  }
+
+  void _abrirMenuExportacion() {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -300,19 +438,25 @@ class _FinanceTabState extends State<FinanceTab> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Exportar Informe Legal', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text('Exportar Datos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
               ListTile(
-                leading: const CircleAvatar(backgroundColor: Colors.teal, child: Icon(Icons.history, color: Colors.white)),
-                title: const Text('Histórico Completo'),
-                subtitle: const Text('Descarga todos los movimientos desde el principio'),
+                leading: const CircleAvatar(backgroundColor: Colors.redAccent, child: Icon(Icons.picture_as_pdf, color: Colors.white)),
+                title: const Text('Informe Legal (PDF)'),
+                subtitle: const Text('Documento formal para abogados/jueces'),
                 onTap: () { Navigator.pop(ctx); PdfService().exportarInformeLegal(context, listaGastos, _calcularBalance(), null); },
+              ),
+              ListTile(
+                leading: const CircleAvatar(backgroundColor: Colors.green, child: Icon(Icons.table_view, color: Colors.white)),
+                title: const Text('Excel / CSV'),
+                subtitle: const Text('Hoja de cálculo para tus cuentas'),
+                onTap: () { Navigator.pop(ctx); ExcelService().exportarExcel(context, listaGastos); },
               ),
               const Divider(),
               ListTile(
                 leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.date_range, color: Colors.white)),
-                title: const Text('Seleccionar Fechas'),
-                subtitle: const Text('Elige un trimestre o mes en concreto'),
+                title: const Text('Informe PDF por Fechas'),
+                subtitle: const Text('Elige un trimestre o mes concreto'),
                 onTap: () async {
                   Navigator.pop(ctx);
                   final DateTimeRange? rango = await showDateRangePicker(
@@ -388,14 +532,15 @@ class _FinanceTabState extends State<FinanceTab> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(gasto.esDevolucion ? 'Detalle de Devolución' : 'Detalle del Gasto', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    // BUG 2: Bomba de Humo - Bloqueamos borrar si hay disputa, aunque no haya pagos
-                    if (!gasto.estaPagado && !gasto.enDisputa && gasto.creador == miNombreReal && gasto.cantidadPagada == 0 && gasto.pagoPendienteValidacion == 0)
-                      Row(
-                        children: [
-                          IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: !gasto.esCobroIntegro, gastoAEditar: gasto, indexAEditar: indexReal); }),
-                          IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => _borrarGasto(indexReal)),
-                        ],
-                      )
+                    
+                    Row(
+                      children: [
+                        // EDITAR: Siempre visible (pero dentro se bloquea si es necesario)
+                        if (gasto.creador == miNombreReal) IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: !gasto.esCobroIntegro, gastoAEditar: gasto, indexAEditar: indexReal); }),
+                        // BORRAR: Solo visible si es seguro (Tu lógica original estaba perfecta aquí)
+                        if (!gasto.estaPagado && !gasto.enDisputa && gasto.creador == miNombreReal && gasto.cantidadPagada == 0 && gasto.pagoPendienteValidacion == 0) IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => _borrarGasto(indexReal)),
+                      ],
+                    )
                   ],
                 ),
                 const Divider(),
@@ -487,13 +632,23 @@ class _FinanceTabState extends State<FinanceTab> {
                     ),
                   ),
 
+                // SECCIÓN DE AUDITORÍA (Solo visible si hay cambios)
+                if (gasto.historialModificaciones.isNotEmpty)
+                  ExpansionTile(
+                    title: const Text('Historial de Modificaciones', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    leading: const Icon(Icons.history_edu, size: 16, color: Colors.grey),
+                    children: gasto.historialModificaciones.map((mod) => ListTile(
+                      dense: true, title: Text(mod, style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic)), leading: const Icon(Icons.circle, size: 6, color: Colors.grey),
+                    )).toList(),
+                  ),
+
                 ListTile(
                   leading: Icon(gasto.estaPagado ? Icons.history : _getIconoPorCategoria(gasto.categoria), color: gasto.estaPagado ? Colors.grey : _getColorPorCategoria(gasto.categoria)),
                   title: Text(gasto.titulo),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${gasto.categoria} | ${_formatearFecha(gasto.fecha)}\nTotal Ticket: ${gasto.total.toStringAsFixed(2)}€\nProporción: ${gasto.esCobroIntegro ? '100%' : '${gasto.porcentaje.toInt()}% / ${(100 - gasto.porcentaje).toInt()}%'}'),
+                      Text('Creado por: ${gasto.creador}\n${gasto.categoria} | ${_formatearFecha(gasto.fecha)}\nTotal Ticket: ${gasto.total.toStringAsFixed(2)}€\nProporción: ${gasto.esCobroIntegro ? '100%' : '${gasto.porcentaje.toInt()}% / ${(100 - gasto.porcentaje).toInt()}%'}'),
                       if (gasto.fechaLimite != null) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text('⚠️ Vence el: ${_formatearFecha(gasto.fechaLimite!)}', style: TextStyle(color: Colors.red.shade800, fontWeight: FontWeight.bold, fontSize: 12))),
                       if (gasto.fechaEdicion != null) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text('(Editado el ${_formatearFecha(gasto.fechaEdicion!)})', style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.blueGrey, fontSize: 11))),
                     ],
@@ -531,7 +686,27 @@ class _FinanceTabState extends State<FinanceTab> {
                 if (gasto.esRecurrente) const Align(alignment: Alignment.centerLeft, child: Chip(avatar: Icon(Icons.autorenew, size: 16), label: Text('Se repite cada mes'), backgroundColor: Colors.amberAccent)),
 
                 const SizedBox(height: 10),
-                if (gasto.rutasAdjuntos.isNotEmpty) Container(height: 120, child: ListView.builder(scrollDirection: Axis.horizontal, itemCount: gasto.rutasAdjuntos.length, itemBuilder: (ctx, i) { return Container(width: 120, margin: const EdgeInsets.only(right: 10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300), image: DecorationImage(image: kIsWeb ? NetworkImage(gasto.rutasAdjuntos[i]) as ImageProvider : FileImage(File(gasto.rutasAdjuntos[i])), fit: BoxFit.cover))); })),
+                if (gasto.rutasAdjuntos.isNotEmpty) SizedBox(height: 120, child: ListView.builder(scrollDirection: Axis.horizontal, itemCount: gasto.rutasAdjuntos.length, itemBuilder: (ctx, i) { 
+                  return GestureDetector(
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => Dialog(
+                          backgroundColor: Colors.black,
+                          insetPadding: EdgeInsets.zero,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              InteractiveViewer(child: kIsWeb ? Image.network(gasto.rutasAdjuntos[i]) : Image.file(File(gasto.rutasAdjuntos[i]))),
+                              Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                    child: Container(width: 120, margin: const EdgeInsets.only(right: 10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300), image: DecorationImage(image: kIsWeb ? NetworkImage(gasto.rutasAdjuntos[i]) as ImageProvider : FileImage(File(gasto.rutasAdjuntos[i])), fit: BoxFit.cover)))
+                  ); 
+                })),
                 const SizedBox(height: 20),
 
                 if (gasto.estaPagado) ...[
@@ -560,7 +735,101 @@ class _FinanceTabState extends State<FinanceTab> {
     );
   }
 
-  void _abrirFormulario(BuildContext context, {required bool esGastoCompartido, Gasto? gastoAEditar, int? indexAEditar, bool esDevolucion = false}) {
+  // --- NUEVA FUNCIÓN: ESTADÍSTICAS DE GASTOS ---
+  void _mostrarEstadisticas() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        bool verSoloLoMio = false;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            Map<String, double> porCategoria = {};
+            double totalCalculado = 0.0;
+
+            // Calculamos totales según el filtro
+            for (var g in listaGastos) {
+              // Si verSoloLoMio es true, usamos g.miParte. Si es false, usamos g.total
+              double valor = verSoloLoMio ? g.miParte : g.total;
+              
+              porCategoria.update(g.categoria, (val) => val + valor, ifAbsent: () => valor);
+              totalCalculado += valor;
+            }
+
+            // Ordenamos de mayor a menor gasto
+            var categoriasOrdenadas = porCategoria.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value));
+
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Desglose de Gastos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
+                  const SizedBox(height: 10),
+                  
+                  // INTERRUPTOR MÁGICO
+                  Container(
+                    decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(10)),
+                    child: SwitchListTile(
+                      title: Text(verSoloLoMio ? 'Mi Coste Real' : 'Coste Total (Niños)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Text(verSoloLoMio ? 'Lo que te corresponde pagar a ti' : 'Suma total de los tickets subidos'),
+                      value: verSoloLoMio,
+                      activeThumbColor: Colors.teal,
+                      secondary: Icon(verSoloLoMio ? Icons.person : Icons.people, color: Colors.teal),
+                      onChanged: (val) { setModalState(() { verSoloLoMio = val; }); }
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 15),
+                  Text('Total: ${totalCalculado.toStringAsFixed(2)} €', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 16)),
+                  const Divider(height: 20),
+                  
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: categoriasOrdenadas.length,
+                      itemBuilder: (ctx, i) {
+                        final cat = categoriasOrdenadas[i];
+                        final porcentaje = totalCalculado > 0 ? (cat.value / totalCalculado) : 0.0;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(_getIconoPorCategoria(cat.key), color: _getColorPorCategoria(cat.key), size: 20),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: Text(cat.key, style: const TextStyle(fontWeight: FontWeight.bold))),
+                                  Text('${cat.value.toStringAsFixed(2)} €', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                              const SizedBox(height: 5),
+                              LinearProgressIndicator(
+                                value: porcentaje,
+                                backgroundColor: Colors.grey.shade200,
+                                color: _getColorPorCategoria(cat.key),
+                                minHeight: 8,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              Align(alignment: Alignment.centerRight, child: Text('${(porcentaje * 100).toStringAsFixed(1)}%', style: const TextStyle(fontSize: 10, color: Colors.grey))),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+        );
+      }
+    );
+  }
+
+  void _abrirFormulario(BuildContext context, {required bool esGastoCompartido, Gasto? gastoAEditar, int? indexAEditar, bool esDevolucion = false, bool esPagoPropio = false}) {
     if (gastoAEditar != null) {
       _conceptoController.text = gastoAEditar.titulo;
       _importeController.text = gastoAEditar.total.toStringAsFixed(2).replaceAll('.', ','); 
@@ -570,13 +839,17 @@ class _FinanceTabState extends State<FinanceTab> {
     }
 
     List<String> rutasFotosTemporales = gastoAEditar?.rutasAdjuntos.toList() ?? [];
-    String categoriaSeleccionada = gastoAEditar?.categoria ?? (esGastoCompartido ? 'Otro' : 'Pensión'); 
+    String categoriaSeleccionada = gastoAEditar?.categoria ?? (esGastoCompartido ? 'Otro' : (esPagoPropio ? 'Pensión' : 'Otro')); 
     DateTime fechaSeleccionada = gastoAEditar?.fecha ?? DateTime.now();
     DateTime? fechaLimite = gastoAEditar?.fechaLimite;
     double porcentajeSeleccionado = gastoAEditar?.porcentaje ?? 50.0;
     bool esRecurrente = gastoAEditar?.esRecurrente ?? false;
     bool esExtraordinario = gastoAEditar?.esExtraordinario ?? false;
     List<String> ninosSeleccionados = gastoAEditar?.ninosAsignados.toList() ?? [];
+
+    // BLINDAJE INTELIGENTE: Si hay dinero de por medio, bloqueamos campos críticos
+    bool edicionBloqueada = false;
+    if (gastoAEditar != null && (gastoAEditar.cantidadPagada > 0 || gastoAEditar.pagoPendienteValidacion > 0 || gastoAEditar.enDisputa)) { edicionBloqueada = true; }
 
     final categorias = esGastoCompartido ? ['Educación', 'Salud', 'Ropa', 'Alimentación', 'Ocio', 'Otro'] : ['Pensión', 'Educación', 'Salud', 'Otro'];
 
@@ -591,7 +864,17 @@ class _FinanceTabState extends State<FinanceTab> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(gastoAEditar != null ? 'Editar Registro' : (esDevolucion ? 'Registrar Devolución' : (esGastoCompartido ? 'Añadir Gasto' : 'Solicitar Cobro Íntegro')), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
+                    Text(
+                      gastoAEditar != null ? 'Editar Registro' : 
+                      (esDevolucion ? 'Registrar Devolución' : 
+                      (esGastoCompartido ? 'Añadir Gasto Compartido' : 
+                      (esPagoPropio ? 'Registrar Pago Íntegro (Ej: Pensión)' : 'Solicitar Cobro Íntegro'))), 
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal), textAlign: TextAlign.center
+                    ),
+                    
+                    if (edicionBloqueada)
+                      Container(margin: const EdgeInsets.only(top: 10), padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.orange.shade50, border: Border.all(color: Colors.orange)), child: const Row(children: [Icon(Icons.lock, size: 16, color: Colors.orange), SizedBox(width: 5), Expanded(child: Text('Edición limitada: Gasto con actividad financiera.', style: TextStyle(fontSize: 12, color: Colors.deepOrange)))]))
+                    ,
                     const SizedBox(height: 15),
                     
                     if (esGastoCompartido && !esDevolucion) ...[
@@ -599,8 +882,8 @@ class _FinanceTabState extends State<FinanceTab> {
                         title: const Text('Es un Gasto Extraordinario', style: TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: const Text('Gafas, dentista, extraescolares...'),
                         value: esExtraordinario,
-                        activeColor: Colors.purple,
-                        onChanged: (val) { setModalState(() { esExtraordinario = val; }); }
+                        activeThumbColor: Colors.purple,
+                        onChanged: (val) { setModalState(() { esExtraordinario = val; if (val) esRecurrente = false; }); }
                       ),
                       const Divider(),
                       const Align(alignment: Alignment.centerLeft, child: Text('¿A quién corresponde este gasto?', style: TextStyle(fontWeight: FontWeight.bold))),
@@ -614,7 +897,11 @@ class _FinanceTabState extends State<FinanceTab> {
                             checkmarkColor: Colors.teal,
                             onSelected: (bool selected) {
                               setModalState(() {
-                                if (selected) ninosSeleccionados.add(nino); else ninosSeleccionados.remove(nino);
+                                if (selected) {
+                                  ninosSeleccionados.add(nino);
+                                } else {
+                                  ninosSeleccionados.remove(nino);
+                                }
                               });
                             },
                           );
@@ -625,7 +912,7 @@ class _FinanceTabState extends State<FinanceTab> {
 
                     Row(
                       children: [
-                        Expanded(child: DropdownButtonFormField<String>(value: categoriaSeleccionada, decoration: InputDecoration(labelText: 'Categoría', prefixIcon: Icon(_getIconoPorCategoria(categoriaSeleccionada), color: _getColorPorCategoria(categoriaSeleccionada)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), items: categorias.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(), onChanged: (val) { setModalState(() { categoriaSeleccionada = val!; }); })),
+                        Expanded(child: DropdownButtonFormField<String>(initialValue: categoriaSeleccionada, decoration: InputDecoration(labelText: 'Categoría', prefixIcon: Icon(_getIconoPorCategoria(categoriaSeleccionada), color: _getColorPorCategoria(categoriaSeleccionada)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), items: categorias.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(), onChanged: (val) { setModalState(() { categoriaSeleccionada = val!; }); })),
                         const SizedBox(width: 10),
                         Expanded(child: OutlinedButton.icon(onPressed: () async { DateTime? elegida = await showDatePicker(context: context, initialDate: fechaSeleccionada, firstDate: DateTime(2020), lastDate: DateTime.now()); if (elegida != null) setModalState(() { fechaSeleccionada = elegida; }); }, icon: const Icon(Icons.calendar_today), label: Text(_formatearFecha(fechaSeleccionada)), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))))),
                       ],
@@ -636,10 +923,10 @@ class _FinanceTabState extends State<FinanceTab> {
                       OutlinedButton.icon(onPressed: () async { DateTime? elegida = await showDatePicker(context: context, initialDate: fechaLimite ?? DateTime.now().add(const Duration(days: 7)), firstDate: DateTime.now(), lastDate: DateTime(2030)); if (elegida != null) setModalState(() { fechaLimite = elegida; }); }, icon: Icon(Icons.timer, color: fechaLimite != null ? Colors.red : Colors.grey), label: Text(fechaLimite != null ? 'Vence: ${_formatearFecha(fechaLimite!)}' : 'Añadir Fecha Límite de Pago', style: TextStyle(color: fechaLimite != null ? Colors.red : Colors.black87)), style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 50), alignment: Alignment.centerLeft)),
                     const SizedBox(height: 15),
 
-                    TextField(controller: _conceptoController, decoration: InputDecoration(labelText: esDevolucion ? 'Concepto de la Devolución' : 'Concepto / Tienda', prefixIcon: const Icon(Icons.edit_note), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)))),
+                    TextField(controller: _conceptoController, readOnly: edicionBloqueada, decoration: InputDecoration(labelText: esDevolucion ? 'Concepto de la Devolución' : 'Concepto / Tienda', prefixIcon: const Icon(Icons.edit_note), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)), filled: edicionBloqueada, fillColor: edicionBloqueada ? Colors.grey.shade200 : null)),
                     const SizedBox(height: 15),
                     
-                    TextField(controller: _importeController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: esDevolucion ? 'Importe Devuelto (€)' : 'Importe Total del Ticket (€)', prefixIcon: const Icon(Icons.euro), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)))),
+                    TextField(controller: _importeController, readOnly: edicionBloqueada, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: esDevolucion ? 'Importe Devuelto (€)' : 'Importe Total del Ticket (€)', prefixIcon: const Icon(Icons.euro), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)), filled: edicionBloqueada, fillColor: edicionBloqueada ? Colors.grey.shade200 : null)),
                     const SizedBox(height: 15),
 
                     if (esGastoCompartido) ...[
@@ -647,7 +934,7 @@ class _FinanceTabState extends State<FinanceTab> {
                       Row(
                         children: [
                           Text('Tú: ${porcentajeSeleccionado.toInt()}%', style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
-                          Expanded(child: Slider(value: porcentajeSeleccionado, min: 0, max: 100, divisions: 100, label: '${porcentajeSeleccionado.toInt()}%', onChanged: (val) { setModalState(() { porcentajeSeleccionado = val; }); })),
+                          Expanded(child: Slider(value: porcentajeSeleccionado, min: 0, max: 100, divisions: 100, label: '${porcentajeSeleccionado.toInt()}%', onChanged: edicionBloqueada ? null : (val) { setModalState(() { porcentajeSeleccionado = val; }); })),
                           Text('El otro: ${(100 - porcentajeSeleccionado).toInt()}%', style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
                         ],
                       ),
@@ -667,7 +954,7 @@ class _FinanceTabState extends State<FinanceTab> {
                       style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20), side: BorderSide(color: rutasFotosTemporales.isNotEmpty ? Colors.green : Colors.teal)),
                     ),
                     
-                    SwitchListTile(title: const Text('Gasto recurrente (Mensual)'), secondary: const Icon(Icons.autorenew), value: esRecurrente, activeColor: Colors.teal, onChanged: (bool val) { setModalState(() { esRecurrente = val; }); }),
+                    SwitchListTile(title: const Text('Gasto recurrente (Mensual)'), secondary: const Icon(Icons.autorenew), value: esRecurrente, activeThumbColor: Colors.teal, onChanged: (bool val) { setModalState(() { esRecurrente = val; if (val) esExtraordinario = false; }); }),
 
                     const SizedBox(height: 10),
                     SizedBox(
@@ -679,11 +966,40 @@ class _FinanceTabState extends State<FinanceTab> {
                 
                           if (concepto.isNotEmpty && importe > 0) {
                             setState(() {
-                              double miPorcentaje = esGastoCompartido ? porcentajeSeleccionado : 100.0;
-                              double parteQueReclamo = importe * ((100 - miPorcentaje) / 100);
+                              // LÓGICA CORREGIDA:
+                              double miPorcentajeCalculado;
+                              double miParteCalculada; // Lo que debo pagar O lo que me deben pagar
+                              bool soyElDeudor;
+
+                              if (esGastoCompartido) {
+                                miPorcentajeCalculado = porcentajeSeleccionado;
+                                soyElDeudor = false; // Yo he pagado el ticket, reclamo la diferencia
+                                miParteCalculada = importe * ((100 - miPorcentajeCalculado) / 100);
+                              } else if (esPagoPropio) {
+                                // CASO: PAGO PENSIÓN (Yo pago todo)
+                                miPorcentajeCalculado = 100.0; // Mi coste es el 100%
+                                soyElDeudor = true; // Yo debo este dinero (o lo estoy pagando)
+                                miParteCalculada = importe; 
+                              } else {
+                                // CASO: SOLICITAR COBRO (Me deben todo)
+                                miPorcentajeCalculado = 0.0; // Mi coste es 0%
+                                soyElDeudor = false; // Yo soy el acreedor
+                                miParteCalculada = importe;
+                              }
+
+                              // AUDITORÍA: Si editamos, registramos qué ha pasado
+                              List<String> historial = gastoAEditar?.historialModificaciones.toList() ?? [];
+                              if (gastoAEditar != null) {
+                                String fechaCambio = _formatearFecha(DateTime.now());
+                                // Si cambiamos categoría o fecha, lo anotamos. Usamos ! porque ya sabemos que no es null
+                                if (gastoAEditar.categoria != categoriaSeleccionada) {
+                                  historial.add('$fechaCambio: Categoría cambiada de ${gastoAEditar.categoria} a $categoriaSeleccionada');
+                                }
+                                // Aquí se pueden añadir más campos si se desbloquean
+                              }
                 
                               Gasto gastoModificado = Gasto(
-                                titulo: concepto, total: importe, miParte: parteQueReclamo, porcentaje: miPorcentaje, soyDeudor: false, creador: miNombreReal, 
+                                titulo: concepto, total: importe, miParte: miParteCalculada, porcentaje: miPorcentajeCalculado, soyDeudor: soyElDeudor, creador: miNombreReal, 
                                 rutasAdjuntos: rutasFotosTemporales, categoria: categoriaSeleccionada, esCobroIntegro: !esGastoCompartido, fecha: fechaSeleccionada, 
                                 esRecurrente: esRecurrente, esExtraordinario: esExtraordinario, ninosAsignados: ninosSeleccionados,
                                 fechaEdicion: (gastoAEditar != null) ? DateTime.now() : null, 
@@ -694,7 +1010,8 @@ class _FinanceTabState extends State<FinanceTab> {
                                 hiloDisputa: gastoAEditar?.hiloDisputa, 
                                 metodoPago: gastoAEditar?.metodoPago ?? '',
                                 esDevolucion: esDevolucion, fechaLimite: fechaLimite, 
-                                comprobantePago: gastoAEditar?.comprobantePago
+                                comprobantePago: gastoAEditar?.comprobantePago,
+                                historialModificaciones: historial
                               );
                 
                               if (gastoAEditar != null && indexAEditar != null) { listaGastos[indexAEditar] = gastoModificado; } else { listaGastos.insert(0, gastoModificado); }
@@ -733,6 +1050,8 @@ class _FinanceTabState extends State<FinanceTab> {
             ListTile(leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.receipt, color: Colors.white)), title: const Text('Añadir Gasto Compartido'), onTap: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: true); }),
             const Divider(),
             ListTile(leading: const CircleAvatar(backgroundColor: Colors.teal, child: Icon(Icons.request_quote, color: Colors.white)), title: const Text('Solicitar Cobro Íntegro'), onTap: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: false); }),
+            const Divider(),
+            ListTile(leading: const CircleAvatar(backgroundColor: Colors.purple, child: Icon(Icons.payments, color: Colors.white)), title: const Text('Registrar Pago Propio'), subtitle: const Text('Ej: Pagar Pensión, Extraescolar completa...'), onTap: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: false, esPagoPropio: true); }),
             const Divider(),
             ListTile(leading: CircleAvatar(backgroundColor: Colors.teal.shade800, child: const Icon(Icons.currency_exchange, color: Colors.white)), title: const Text('Registrar Abono / Devolución'), subtitle: const Text('Si te han devuelto dinero de una compra'), onTap: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: true, esDevolucion: true); }),
             const SizedBox(height: 10),
@@ -773,6 +1092,15 @@ class _FinanceTabState extends State<FinanceTab> {
             ),
           ),
           
+          if (balanceFinal != 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: OutlinedButton.icon(
+                onPressed: _abrirLiquidacionAvanzada, icon: const Icon(Icons.checklist_rtl, size: 18), label: const Text('Liquidar Deuda Acumulada (Seleccionar)'),
+                style: OutlinedButton.styleFrom(foregroundColor: Colors.teal.shade800, side: BorderSide(color: Colors.teal.shade200)),
+              ),
+            ),
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 5),
             child: Row(
@@ -782,6 +1110,12 @@ class _FinanceTabState extends State<FinanceTab> {
                     decoration: InputDecoration(hintText: 'Buscar gasto...', prefixIcon: const Icon(Icons.search, size: 20), isDense: true, contentPadding: const EdgeInsets.all(8), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                     onChanged: (val) { setState(() { _searchQuery = val; }); },
                   ),
+                ),
+                // BOTÓN DE ESTADÍSTICAS AÑADIDO AQUÍ
+                IconButton(
+                  icon: const Icon(Icons.pie_chart, color: Colors.teal),
+                  onPressed: _mostrarEstadisticas,
+                  tooltip: 'Ver estadísticas',
                 ),
                 const SizedBox(width: 10),
                 DropdownButton<String>(
@@ -811,9 +1145,9 @@ class _FinanceTabState extends State<FinanceTab> {
               children: [
                 const Text('Historial', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black54)),
                 TextButton.icon(
-                  onPressed: _abrirMenuExportacionPDF, 
-                  icon: const Icon(Icons.picture_as_pdf, size: 18, color: Colors.redAccent), 
-                  label: const Text('Exportar PDF', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                  onPressed: _abrirMenuExportacion, 
+                  icon: const Icon(Icons.download, size: 18, color: Colors.teal), 
+                  label: const Text('Exportar', style: TextStyle(color: Colors.teal, fontSize: 12)),
                 )
               ],
             ),
@@ -827,6 +1161,7 @@ class _FinanceTabState extends State<FinanceTab> {
                 final gasto = gastosMostrados[index];
                 final int indexReal = listaGastos.indexOf(gasto);
                 bool esAcreedorReal = gasto.esDevolucion ? gasto.soyDeudor : !gasto.soyDeudor;
+                bool esperandoValidacion = gasto.pagoPendienteValidacion > 0;
 
                 Color colorDeFondo;
                 if (gasto.enDisputa) { colorDeFondo = Colors.red.shade50; } else if (gasto.estaPagado) { colorDeFondo = Colors.grey.shade100; } else if (esAcreedorReal) { colorDeFondo = Colors.teal.shade50; } else { colorDeFondo = Colors.orange.shade50; }
@@ -841,13 +1176,14 @@ class _FinanceTabState extends State<FinanceTab> {
                         Expanded(child: Text(gasto.titulo, style: TextStyle(decoration: gasto.estaPagado ? TextDecoration.lineThrough : null, color: gasto.enDisputa ? Colors.red : (gasto.estaPagado ? Colors.grey : Colors.black), fontWeight: gasto.enDisputa ? FontWeight.bold : FontWeight.normal))),
                         if (gasto.esExtraordinario && !gasto.esDevolucion) const Icon(Icons.star, size: 14, color: Colors.purple), 
                         if (gasto.esDevolucion) const Icon(Icons.currency_exchange, size: 14, color: Colors.teal), 
+                        if (esperandoValidacion) const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.pending_actions, size: 14, color: Colors.orange)),
                       ],
                     ),
                     
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(gasto.enDisputa ? '⚠️ EN DISPUTA' : (gasto.estaPagado ? 'Liquidado el ${_formatearFecha(gasto.fecha)}' : (!esAcreedorReal ? 'Debes pagar tu parte' : 'Te deben este dinero'))),
+                        Text(gasto.enDisputa ? '⚠️ EN DISPUTA' : (gasto.estaPagado ? 'Liquidado el ${_formatearFecha(gasto.fecha)}' : (esperandoValidacion ? '🕒 Esperando validación del pago...' : (!esAcreedorReal ? 'Debes pagar tu parte' : 'Te deben este dinero')))),
                         if (gasto.fechaLimite != null && !gasto.estaPagado && !gasto.enDisputa) Padding(padding: const EdgeInsets.only(top: 2.0), child: Text('⏳ Vence: ${_formatearFecha(gasto.fechaLimite!)}', style: TextStyle(fontSize: 11, color: Colors.red.shade800, fontWeight: FontWeight.bold))),
                         if (gasto.cantidadPagada > 0 && !gasto.estaPagado) Padding(padding: const EdgeInsets.only(top: 2.0), child: Text('💰 Abonado: ${gasto.cantidadPagada.toStringAsFixed(2)}€', style: const TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.bold))),
                       ],
@@ -856,7 +1192,7 @@ class _FinanceTabState extends State<FinanceTab> {
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text('${!esAcreedorReal ? '-' : '+'}${_redondear(gasto.miParte - gasto.cantidadPagada).toStringAsFixed(2)} €', style: TextStyle(color: gasto.enDisputa ? Colors.red : (gasto.estaPagado ? Colors.grey : (!esAcreedorReal ? Colors.red : Colors.green)), fontWeight: FontWeight.bold, decoration: (gasto.estaPagado || gasto.enDisputa) ? TextDecoration.lineThrough : null)),
+                        Text('${!esAcreedorReal ? '-' : '+'}${_redondear(gasto.miParte - gasto.cantidadPagada).toStringAsFixed(2)} €', style: TextStyle(color: gasto.enDisputa ? Colors.red : (gasto.estaPagado ? Colors.grey : (esperandoValidacion ? Colors.orange : (!esAcreedorReal ? Colors.red : Colors.green))), fontWeight: FontWeight.bold, decoration: (gasto.estaPagado || gasto.enDisputa) ? TextDecoration.lineThrough : null)),
                         if (gasto.estaPagado) const Text('PAGADO', style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
                       ],
                     ),

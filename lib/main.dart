@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
-import 'screens/login_screen.dart'; // Importamos tu nuevo login
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
-void main() {
-  // Arrancamos la interfaz visual directamente
+import 'screens/login_screen.dart'; // Asegúrate de que esta ruta existe
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await initializeDateFormatting('es_ES', null);
+
   runApp(const KinduApp());
 }
 
@@ -13,14 +19,20 @@ class KinduApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Kindu',
-      debugShowCheckedModeBanner: false, // Quitamos la etiqueta roja de "debug"
+      debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('es', 'ES'),
+      ],
       theme: ThemeData(
-        // Usamos Teal como color principal de la marca Kindu
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
         useMaterial3: true,
       ),
-      // Aquí le decimos que la pantalla de inicio sea el Login
-      home: const LoginScreen(), 
+      home: const LoginScreen(),
     );
   }
 }

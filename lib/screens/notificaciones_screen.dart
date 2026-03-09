@@ -25,7 +25,7 @@ class NotificacionesScreen extends StatelessWidget {
       {
         'icono': Icons.calendar_today, 'color': Colors.orange, 
         'titulo': 'Cambio en el Calendario', 
-        'mensaje': 'Yaiza ha añadido "Cita Dentista Hugo".', 
+        'mensaje': 'Yaiza ha añadido "Cita Dentista Viggo".', 
         'tiempo': 'Ayer', 
         'tabIndex': 0 // Nos llevará a la Agenda
       },
