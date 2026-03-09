@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:image_picker/image_picker.dart'; // Añadido para Evidencia Documental
 import '../services/pdf_service.dart'; // Añadido para el pilar de exportación
 
 // 1. MODELO DE DATOS (Lo definimos aquí para simular la BD)
@@ -26,6 +28,10 @@ class Evento {
   String? solicitanteCambio; 
   DateTime? vistoPorOtro; 
   List<MensajeCalendario> chat;
+  
+  // JUGADA 2: EVIDENCIA DOCUMENTAL
+  List<String> adjuntos; // Rutas de fotos (informes médicos, notas...)
+  List<String> logsTrazabilidad; // "10:00 - Check-in GPS", "10:05 - Foto subida"
 
   Evento({
     required this.titulo,
@@ -39,7 +45,9 @@ class Evento {
     this.solicitanteCambio,
     this.vistoPorOtro,
     List<MensajeCalendario>? chat,
-  }) : chat = chat ?? [];
+    List<String>? adjuntos,
+    List<String>? logsTrazabilidad,
+  }) : chat = chat ?? [], adjuntos = adjuntos ?? [], logsTrazabilidad = logsTrazabilidad ?? [];
 }
 
 class CalendarTab extends StatefulWidget {
@@ -57,6 +65,9 @@ class _CalendarTabState extends State<CalendarTab> {
 
   final String miNombre = 'Alberto';
   final String otroNombre = 'Yaiza';
+
+  // JUGADA 4: RBAC (Role-Based Access Control)
+  String _rolUsuario = 'admin'; // Valores: 'admin' (Padre/Madre), 'observer' (Abuelo/Mediador)
 
   // --- CONFIGURACIÓN DE CUSTODIA (Estado) ---
   DateTime _inicioCustodia = DateTime(2024, 1, 1);
@@ -143,6 +154,23 @@ class _CalendarTabState extends State<CalendarTab> {
     }
   }
 
+  // JUGADA 1: SIMULACIÓN DE CHECK-IN GEOPOSICIONADO
+  // En producción usarías el paquete 'geolocator' aquí.
+  void _registrarCheckInGPS() {
+    // 1. Obtener coordenadas (Simulado)
+    final ahora = DateTime.now();
+    const lat = 40.416775;
+    const long = -3.703790;
+    
+    // 2. Crear el log de trazabilidad
+    String log = '📍 ${ahora.hour}:${ahora.minute.toString().padLeft(2,"0")}h - Check-in GPS: Lat $lat, Long $long (Precisión: 12m)';
+    
+    setState(() {
+      // Añadimos este log a un evento especial del día o a una lista general del día
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(log), backgroundColor: Colors.green));
+    });
+  }
+
   // --- FORMULARIO (Mantenemos el tuyo intacto, solo añadimos la lógica del Pilar 3) ---
   void _abrirFormularioEvento() {
     final TextEditingController tituloCtrl = TextEditingController();
@@ -151,6 +179,8 @@ class _CalendarTabState extends State<CalendarTab> {
     DateTime fechaSeleccionada = _selectedDay ?? DateTime.now();
     TimeOfDay horaSeleccionada = TimeOfDay.now();
     bool esImportante = false;
+    // JUGADA 2: Adjuntos en creación
+    List<String> rutasAdjuntos = [];
 
     showModalBottomSheet(
       context: context,
@@ -207,18 +237,52 @@ class _CalendarTabState extends State<CalendarTab> {
                   
                   SwitchListTile(title: const Text('Marcar como Importante'), value: esImportante, activeThumbColor: Colors.orange, onChanged: (v) => setModalState(() => esImportante = v)),
                   
+                  // JUGADA 2: BOTÓN ADJUNTAR EVIDENCIA
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final List<XFile> fotos = await ImagePicker().pickMultiImage();
+                      if (fotos.isNotEmpty) {
+                        setModalState(() => rutasAdjuntos.addAll(fotos.map((f) => f.path)));
+                      }
+                    },
+                    icon: const Icon(Icons.attach_file),
+                    label: Text(rutasAdjuntos.isEmpty ? 'Adjuntar Evidencia (Informe/Notas)' : '${rutasAdjuntos.length} Documentos adjuntos'),
+                  ),
+                  const SizedBox(height: 10),
+
                   SizedBox(width: double.infinity, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white), onPressed: () {
                     if (tituloCtrl.text.isNotEmpty) {
                       // PILAR 3 INYECTADO: Verificamos de quién es el día
                       String custodioDia = _getCustodio(fechaSeleccionada);
                       bool esMiDia = custodioDia == miNombre;
                       EstadoEvento estadoInicial = esMiDia ? EstadoEvento.validado : EstadoEvento.pendiente;
+                      
+                      // JUGADA 3: DETECTOR DE COLISIONES (Recurrencia vs Custodia)
+                      // Simulamos que es un evento semanal. Verificamos si choca en el futuro.
+                      bool hayColisionFutura = false;
+                      if (!esMiDia) {
+                        // Si creo un evento en día que NO es mío, ya es una colisión directa
+                        hayColisionFutura = true;
+                      }
+                      // Aquí iría un bucle for revisando las próximas 4 semanas si fuera recurrente
+
+                      if (hayColisionFutura) {
+                        // Warning Forense
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('⚠️ ALERTA FORENSE: Este evento invade el tiempo de custodia del otro progenitor. Se requiere su validación.'),
+                          backgroundColor: Colors.deepOrange,
+                          duration: Duration(seconds: 4),
+                        ));
+                      }
 
                       final fechaFinal = DateTime(fechaSeleccionada.year, fechaSeleccionada.month, fechaSeleccionada.day, horaSeleccionada.hour, horaSeleccionada.minute);
-                      final nuevoEvento = Evento(titulo: tituloCtrl.text, fecha: fechaFinal, categoria: categoriaSeleccionada, creador: miNombre, responsable: responsableSeleccionado, esImportante: esImportante, estado: estadoInicial);
+                      final nuevoEvento = Evento(titulo: tituloCtrl.text, fecha: fechaFinal, categoria: categoriaSeleccionada, creador: miNombre, responsable: responsableSeleccionado, esImportante: esImportante, estado: estadoInicial, adjuntos: rutasAdjuntos);
                       
                       setState(() {
                         final key = DateTime.utc(fechaFinal.year, fechaFinal.month, fechaFinal.day);
+                        // Log de creación
+                        nuevoEvento.logsTrazabilidad.add('🆕 Creado por $miNombre el ${DateTime.now().toString().substring(0,16)}');
+                        if (rutasAdjuntos.isNotEmpty) nuevoEvento.logsTrazabilidad.add('📎 ${rutasAdjuntos.length} documentos adjuntados al inicio.');
                         if (_eventos[key] != null) { _eventos[key]!.add(nuevoEvento); } else { _eventos[key] = [nuevoEvento]; }
                       });
                       
@@ -340,7 +404,7 @@ class _CalendarTabState extends State<CalendarTab> {
                           });
                         },
                         calendarBuilders: CalendarBuilders(
-                          defaultBuilder: (context, day, focusedDay) {
+                          defaultBuilder: (_, day, __) {
                             String custodio = _getCustodio(day);
                             bool esMio = custodio == miNombre;
                             return Container(
@@ -353,7 +417,7 @@ class _CalendarTabState extends State<CalendarTab> {
                               child: Text('${day.day}', style: TextStyle(color: esMio ? Colors.blue : Colors.deepOrange)),
                             );
                           },
-                          selectedBuilder: (context, day, focusedDay) {
+                          selectedBuilder: (_, day, __) {
                              bool esSolicitado = diasSolicitados.any((d) => isSameDay(d, day));
                              bool esOfrecido = diasOfrecidos.any((d) => isSameDay(d, day));
                              
@@ -368,7 +432,7 @@ class _CalendarTabState extends State<CalendarTab> {
                                child: Text('${day.day}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                              );
                           },
-                          todayBuilder: (context, day, focusedDay) {
+                          todayBuilder: (_, day, __) {
                             String custodio = _getCustodio(day);
                             bool esMio = custodio == miNombre;
                             return Container(
@@ -503,9 +567,9 @@ class _CalendarTabState extends State<CalendarTab> {
                       
                       // USAMOS EL MISMO CONSTRUCTOR VISUAL QUE EN LA PANTALLA PRINCIPAL
                       calendarBuilders: CalendarBuilders(
-                        defaultBuilder: (context, day, focusedDay) => _buildCustodyDay(day, false, calculator: getCustodioDraft),
-                        todayBuilder: (context, day, focusedDay) => _buildCustodyDay(day, false, isToday: true, calculator: getCustodioDraft),
-                        selectedBuilder: (context, day, focusedDay) => _buildCustodyDay(day, false, calculator: getCustodioDraft),
+                        defaultBuilder: (_, day, __) => _buildCustodyDay(day, false, calculator: getCustodioDraft),
+                        todayBuilder: (_, day, __) => _buildCustodyDay(day, false, isToday: true, calculator: getCustodioDraft),
+                        selectedBuilder: (_, day, __) => _buildCustodyDay(day, false, calculator: getCustodioDraft),
                       ),
                     ),
                   ),
@@ -623,7 +687,7 @@ class _CalendarTabState extends State<CalendarTab> {
                   OutlinedButton.icon(
                     onPressed: () {
                       int dias = 2; String persona = miNombre;
-                      showDialog(context: context, builder: (c) => StatefulBuilder(builder: (c, setD) => AlertDialog(title: const Text('Añadir tramo'), content: Column(mainAxisSize: MainAxisSize.min, children: [Row(children: [const Text('Días: '), IconButton(onPressed: () => setD(() { if(dias>1) dias--; }), icon: const Icon(Icons.remove)), Text('$dias', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), IconButton(onPressed: () => setD(() => dias++), icon: const Icon(Icons.add))]), const SizedBox(height: 10), DropdownButton<String>(value: persona, isExpanded: true, items: [miNombre, otroNombre].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(), onChanged: (v) => setD(() => persona = v!))]), actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')), ElevatedButton(onPressed: () { setModalState(() => _patronCustodia.add({'dias': dias, 'persona': persona})); Navigator.pop(c); }, child: const Text('Añadir'))])));
+                      showDialog(context: context, builder: (dialogContext) => StatefulBuilder(builder: (innerContext, setD) => AlertDialog(title: const Text('Añadir tramo'), content: Column(mainAxisSize: MainAxisSize.min, children: [Row(children: [const Text('Días: '), IconButton(onPressed: () => setD(() { if(dias>1) dias--; }), icon: const Icon(Icons.remove)), Text('$dias', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), IconButton(onPressed: () => setD(() => dias++), icon: const Icon(Icons.add))]), const SizedBox(height: 10), DropdownButton<String>(value: persona, isExpanded: true, items: [miNombre, otroNombre].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(), onChanged: (v) => setD(() => persona = v!))]), actions: [TextButton(onPressed: () => Navigator.pop(innerContext), child: const Text('Cancelar')), ElevatedButton(onPressed: () { setModalState(() => _patronCustodia.add({'dias': dias, 'persona': persona})); Navigator.pop(innerContext); }, child: const Text('Añadir'))])));
                     },
                     icon: const Icon(Icons.add), label: const Text('Añadir tramo al ciclo'), style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 45)),
                   ),
@@ -683,6 +747,7 @@ class _CalendarTabState extends State<CalendarTab> {
   // --- DETALLE DEL EVENTO (He restaurado 100% tu UI) ---
   void _mostrarDetalleEvento(Evento evento) {
     TextEditingController chatCtrl = TextEditingController();
+    bool esObserver = _rolUsuario == 'observer'; // JUGADA 4
     
     if (evento.creador != miNombre && evento.vistoPorOtro == null) {
       setState(() { evento.vistoPorOtro = DateTime.now(); });
@@ -708,7 +773,7 @@ class _CalendarTabState extends State<CalendarTab> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(child: Text(evento.titulo, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.teal))),
-                      if (evento.estado == EstadoEvento.validado)
+                      if (evento.estado == EstadoEvento.validado && !esObserver) // RBAC: Observer no borra
                         IconButton(
                           icon: const Icon(Icons.delete_outline, color: Colors.red),
                           onPressed: () {
@@ -730,6 +795,38 @@ class _CalendarTabState extends State<CalendarTab> {
                     subtitle: Text('Estado actual: ${evento.estado.name.toUpperCase()}'),
                   ),
                   const Divider(),
+
+                  // JUGADA 2: VISUALIZACIÓN DE EVIDENCIA DOCUMENTAL
+                  if (evento.adjuntos.isNotEmpty) ...[
+                    const Text('📎 Evidencia Documental (Informes/Notas)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    const SizedBox(height: 5),
+                    SizedBox(
+                      height: 80,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: evento.adjuntos.length,
+                        itemBuilder: (ctx, i) => Container(
+                          width: 80, margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300), image: DecorationImage(image: FileImage(File(evento.adjuntos[i])), fit: BoxFit.cover)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  
+                  // Botón para añadir más evidencia (Solo si no es observer)
+                  if (!esObserver)
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final List<XFile> fotos = await ImagePicker().pickMultiImage();
+                        if (fotos.isNotEmpty) {
+                          setState(() { 
+                            evento.adjuntos.addAll(fotos.map((f) => f.path)); 
+                            evento.logsTrazabilidad.add('📎 ${fotos.length} documentos añadidos por $miNombre el ${DateTime.now().toString().substring(0,16)}');
+                          });
+                        }
+                      },
+                      icon: const Icon(Icons.add_a_photo, size: 16), label: const Text('Añadir Evidencia'), style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact)),
 
                   if (haySolicitudBorrado)
                     Container(
@@ -789,6 +886,17 @@ class _CalendarTabState extends State<CalendarTab> {
                       ),
                     ),
 
+                  // TRAZABILIDAD (LOGS)
+                  if (evento.logsTrazabilidad.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    const Text('📜 Trazabilidad Forense', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade200)),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: evento.logsTrazabilidad.map((log) => Text(log, style: const TextStyle(fontSize: 10, fontFamily: 'Monospace'))).toList()),
+                    )
+                  ],
+
                   const SizedBox(height: 10),
                   const Text('Chat del Evento', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
@@ -826,7 +934,7 @@ class _CalendarTabState extends State<CalendarTab> {
                         ),
                   ),
                   
-                  Padding(
+                  if (!esObserver) Padding( // RBAC: Observer no chatea
                     padding: const EdgeInsets.only(top: 10, bottom: 20),
                     child: Row(
                       children: [
@@ -896,6 +1004,7 @@ class _CalendarTabState extends State<CalendarTab> {
                     helpText: 'SELECCIONA EL RANGO A IMPRIMIR',
                   );
                   if (rango != null) {
+                    if (!mounted) return;
                     _exportarConRango(rango);
                   }
                 },
@@ -914,6 +1023,14 @@ class _CalendarTabState extends State<CalendarTab> {
     PdfService().exportarCalendarioVisual(context, todosLosEventos, rango, _getCustodio);
   }
 
+  // Helper para cambiar rol (Demo)
+  void _cambiarRol() {
+    setState(() {
+      _rolUsuario = _rolUsuario == 'admin' ? 'observer' : 'admin';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rol cambiado a: ${_rolUsuario.toUpperCase()}'), backgroundColor: Colors.indigo));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -922,6 +1039,12 @@ class _CalendarTabState extends State<CalendarTab> {
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
+          // DEMO SWITCHER DE ROL
+          IconButton(
+            icon: Icon(_rolUsuario == 'admin' ? Icons.security : Icons.remove_red_eye, color: _rolUsuario == 'admin' ? Colors.blue : Colors.grey),
+            onPressed: _cambiarRol,
+            tooltip: 'Cambiar Rol (Admin/Observer)',
+          ),
           // NUEVO BOTÓN DE EXPORTAR (Texto + Icono)
           TextButton.icon(
             onPressed: _abrirMenuExportacion,
@@ -935,10 +1058,11 @@ class _CalendarTabState extends State<CalendarTab> {
           )
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      // JUGADA 4: RBAC - Si es observer, no hay botón flotante de añadir
+      floatingActionButton: _rolUsuario == 'observer' ? null : FloatingActionButton(
         onPressed: _abrirFormularioEvento,
         backgroundColor: Colors.teal,
-        child: const Icon(Icons.add, color: Colors.white),
+        child: const Icon(Icons.add, color: Colors.white), 
       ),
       body: Column(
         children: [
@@ -958,10 +1082,10 @@ class _CalendarTabState extends State<CalendarTab> {
               });
             },
             calendarBuilders: CalendarBuilders(
-              defaultBuilder: (context, day, focusedDay) => _buildCustodyDay(day, false),
-              todayBuilder: (context, day, focusedDay) => _buildCustodyDay(day, false, isToday: true),
-              selectedBuilder: (context, day, focusedDay) => _buildCustodyDay(day, true),
-              markerBuilder: (context, day, events) {
+              defaultBuilder: (_, day, __) => _buildCustodyDay(day, false),
+              todayBuilder: (_, day, __) => _buildCustodyDay(day, false, isToday: true),
+              selectedBuilder: (_, day, __) => _buildCustodyDay(day, true),
+              markerBuilder: (_, __, events) {
                 if (events.isEmpty) return null;
                 return Positioned(
                   bottom: 1,
@@ -1003,13 +1127,22 @@ class _CalendarTabState extends State<CalendarTab> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('Día ${_selectedDay!.day}/${_selectedDay!.month}: Turno de ${_getCustodio(_selectedDay!)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-                if (_getCustodio(_selectedDay!) != miNombre)
+                
+                // JUGADA 1: BOTÓN DE CHECK-IN GPS (Solo visible si es mi turno o si quiero registrar recogida)
+                // Y JUGADA 4: RBAC (Observer no hace check-in)
+                if (_rolUsuario != 'observer')
                   ActionChip(
-                    avatar: const Icon(Icons.swap_horiz, size: 16, color: Colors.teal),
-                    label: const Text('Solicitar Cambio', style: TextStyle(fontSize: 10, color: Colors.teal, fontWeight: FontWeight.bold)),
+                    avatar: const Icon(Icons.my_location, size: 16, color: Colors.white),
+                    label: const Text('Check-in Entrega', style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
                     visualDensity: VisualDensity.compact,
-                    backgroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.teal),
+                    backgroundColor: Colors.indigo,
+                    onPressed: _registrarCheckInGPS,
+                  ),
+                  
+                if (_getCustodio(_selectedDay!) != miNombre && _rolUsuario != 'observer')
+                  IconButton(
+                    icon: const Icon(Icons.swap_horiz, color: Colors.teal),
+                    tooltip: 'Solicitar Cambio',
                     onPressed: () => _solicitarCambioDiaEspecifico(_selectedDay!),
                   )
               ],
@@ -1053,6 +1186,8 @@ class _CalendarTabState extends State<CalendarTab> {
                             if (esCancelado) const Text('❌ EVENTO CANCELADO', style: TextStyle(color: Colors.grey, fontSize: 11, fontStyle: FontStyle.italic)),
                             if (!esCancelado && evento.creador == miNombre && evento.vistoPorOtro != null)
                               Text('👁 Visto por $otroNombre el ${evento.vistoPorOtro!.day}/${evento.vistoPorOtro!.month}', style: const TextStyle(color: Colors.blue, fontSize: 10)),
+                            if (evento.adjuntos.isNotEmpty)
+                              Text('📎 ${evento.adjuntos.length} documentos adjuntos', style: const TextStyle(color: Colors.indigo, fontSize: 10, fontWeight: FontWeight.bold)),
                           ],
                         ),
                         trailing: esSolicitudBorrado 

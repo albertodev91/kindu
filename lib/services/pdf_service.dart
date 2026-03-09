@@ -301,7 +301,7 @@ class PdfService {
                 )
               else
                 pw.TableHelper.fromTextArray(
-                  headers: ['Fecha / Hora', 'Evento / Descripción', 'Categoría', 'Responsable', 'Estado / Auditoría'],
+                  headers: ['Fecha / Hora', 'Evento / Descripción', 'Categoría', 'Responsable', 'Estado / Trazabilidad'],
                   data: eventos.map((e) {
                     // Accedemos dinámicamente a las propiedades del objeto Evento
                     final fecha = e.fecha;
@@ -323,6 +323,16 @@ class PdfService {
                     if (e.vistoPorOtro != null) {
                       final visto = e.vistoPorOtro!;
                       estadoTexto += '\nVisto: ${visto.day}/${visto.month}/${visto.year}';
+                    }
+                    
+                    // JUGADA 2 y 1 EN PDF: AÑADIR LOGS Y ADJUNTOS
+                    if (e.adjuntos.isNotEmpty) {
+                      estadoTexto += '\n\n[📎 ${e.adjuntos.length} EVIDENCIAS ADJUNTAS]';
+                    }
+                    
+                    if (e.logsTrazabilidad.isNotEmpty) {
+                      estadoTexto += '\n\n--- LOGS ---';
+                      for(var log in e.logsTrazabilidad) estadoTexto += '\n$log';
                     }
 
                     return [
