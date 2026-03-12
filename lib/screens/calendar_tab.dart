@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:image_picker/image_picker.dart'; // Añadido para Evidencia Documental
@@ -32,6 +33,7 @@ class Evento {
   // JUGADA 2: EVIDENCIA DOCUMENTAL
   List<String> adjuntos; // Rutas de fotos (informes médicos, notas...)
   List<String> logsTrazabilidad; // "10:00 - Check-in GPS", "10:05 - Foto subida"
+  final List<String> ninosAsignados; // REQ 1: Metadato de Niños Implicados
 
   Evento({
     required this.titulo,
@@ -47,7 +49,8 @@ class Evento {
     List<MensajeCalendario>? chat,
     List<String>? adjuntos,
     List<String>? logsTrazabilidad,
-  }) : chat = chat ?? [], adjuntos = adjuntos ?? [], logsTrazabilidad = logsTrazabilidad ?? [];
+    List<String>? ninosAsignados,
+  }) : chat = chat ?? [], adjuntos = adjuntos ?? [], logsTrazabilidad = logsTrazabilidad ?? [], ninosAsignados = ninosAsignados ?? [];
 }
 
 class CalendarTab extends StatefulWidget {
@@ -83,6 +86,9 @@ class _CalendarTabState extends State<CalendarTab> {
 
   // NUEVO: Mapa para guardar los cambios manuales (Día -> Persona)
   final Map<DateTime, String> _custodiaManual = {};
+
+  // REQ 3: Registro de Alteraciones (Auditoría)
+  final List<String> _registroAuditoria = [];
 
   @override
   void initState() {
@@ -181,6 +187,9 @@ class _CalendarTabState extends State<CalendarTab> {
     bool esImportante = false;
     // JUGADA 2: Adjuntos en creación
     List<String> rutasAdjuntos = [];
+    // REQ 1: Listas para selección de niños
+    final List<String> misHijos = ['Viggo', 'Ivy'];
+    List<String> ninosSeleccionados = [];
 
     showModalBottomSheet(
       context: context,
@@ -237,6 +246,27 @@ class _CalendarTabState extends State<CalendarTab> {
                   
                   SwitchListTile(title: const Text('Marcar como Importante'), value: esImportante, activeThumbColor: Colors.orange, onChanged: (v) => setModalState(() => esImportante = v)),
                   
+                  // REQ 1: Selector de Niños
+                  const SizedBox(height: 10),
+                  const Text('¿A quién afecta?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  Wrap(
+                    spacing: 8,
+                    children: misHijos.map((hijo) {
+                      return FilterChip(
+                        label: Text(hijo),
+                        selected: ninosSeleccionados.contains(hijo),
+                        selectedColor: Colors.teal.shade100,
+                        checkmarkColor: Colors.teal,
+                        onSelected: (bool selected) {
+                          setModalState(() {
+                            if (selected) ninosSeleccionados.add(hijo); else ninosSeleccionados.remove(hijo);
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 10),
+
                   // JUGADA 2: BOTÓN ADJUNTAR EVIDENCIA
                   OutlinedButton.icon(
                     onPressed: () async {
@@ -246,9 +276,47 @@ class _CalendarTabState extends State<CalendarTab> {
                       }
                     },
                     icon: const Icon(Icons.attach_file),
-                    label: Text(rutasAdjuntos.isEmpty ? 'Adjuntar Evidencia (Informe/Notas)' : '${rutasAdjuntos.length} Documentos adjuntos'),
+                    label: Text(rutasAdjuntos.isEmpty ? 'Adjuntar Evidencia (Informe/Notas)' : '${rutasAdjuntos.length} Documentos adjuntos (Añadir más)'),
                   ),
                   const SizedBox(height: 10),
+
+                  // 3. Previsualización de Evidencias al Crear Evento
+                  if (rutasAdjuntos.isNotEmpty) ...[
+                    SizedBox(
+                      height: 100,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: rutasAdjuntos.length,
+                        itemBuilder: (ctx, i) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 10, right: 10),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Container(
+                                  width: 80, height: 80,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                    image: DecorationImage(image: kIsWeb ? NetworkImage(rutasAdjuntos[i]) : FileImage(File(rutasAdjuntos[i])) as ImageProvider, fit: BoxFit.cover)
+                                  ),
+                                ),
+                                Positioned(
+                                  top: -5,
+                                  right: -5,
+                                  child: GestureDetector(
+                                    onTap: () => setModalState(() => rutasAdjuntos.removeAt(i)),
+                                    child: const CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14)),
+                                  ),
+                                )
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
 
                   SizedBox(width: double.infinity, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white), onPressed: () {
                     if (tituloCtrl.text.isNotEmpty) {
@@ -276,7 +344,7 @@ class _CalendarTabState extends State<CalendarTab> {
                       }
 
                       final fechaFinal = DateTime(fechaSeleccionada.year, fechaSeleccionada.month, fechaSeleccionada.day, horaSeleccionada.hour, horaSeleccionada.minute);
-                      final nuevoEvento = Evento(titulo: tituloCtrl.text, fecha: fechaFinal, categoria: categoriaSeleccionada, creador: miNombre, responsable: responsableSeleccionado, esImportante: esImportante, estado: estadoInicial, adjuntos: rutasAdjuntos);
+                      final nuevoEvento = Evento(titulo: tituloCtrl.text, fecha: fechaFinal, categoria: categoriaSeleccionada, creador: miNombre, responsable: responsableSeleccionado, esImportante: esImportante, estado: estadoInicial, adjuntos: rutasAdjuntos, ninosAsignados: ninosSeleccionados);
                       
                       setState(() {
                         final key = DateTime.utc(fechaFinal.year, fechaFinal.month, fechaFinal.day);
@@ -322,6 +390,29 @@ class _CalendarTabState extends State<CalendarTab> {
       // Simulamos que la BD nos devuelve "Aceptado" y actualizamos la UI
       setState(() {
         _custodiaManual.addAll(cambiosPropuestos); 
+        
+        // REQ 2 y 3: Barrido de Eventos Zombis y Auditoría
+        final hoyStr = DateTime.now().toString().substring(0, 10);
+        cambiosPropuestos.forEach((fecha, nuevoCustodio) {
+           // Auditoría
+           String fechaAfectada = "${fecha.day}/${fecha.month}/${fecha.year}";
+           _registroAuditoria.add("El $hoyStr se acordó modificar la custodia del día $fechaAfectada a favor de $nuevoCustodio");
+           
+           // Barrido Zombi (Efecto Mariposa)
+           if (nuevoCustodio != miNombre) {
+             final eventosDia = _getEventosDelDia(fecha);
+             for (var evento in eventosDia) {
+               if (evento.creador == miNombre && evento.estado == EstadoEvento.validado) {
+                 evento.estado = EstadoEvento.pendiente;
+                 evento.chat.add(MensajeCalendario(
+                   autor: 'SISTEMA', 
+                   texto: '⚠️ SISTEMA FORENSE: El día fue cedido tras crear este evento. Requiere re-validación.', 
+                   fecha: DateTime.now()
+                 ));
+               }
+             }
+           }
+        });
       });
       showDialog(
         context: context, 
@@ -730,10 +821,15 @@ class _CalendarTabState extends State<CalendarTab> {
           ElevatedButton(onPressed: () {
             if (motivoCtrl.text.isNotEmpty) {
               setState(() {
+                // 1. Alerta Forense de "Fuera de Plazo"
+                bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
+                String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+
                 evento.estado = EstadoEvento.solicitudEliminacion;
                 evento.solicitanteCambio = miNombre;
                 evento.motivoSolicitud = motivoCtrl.text;
-                evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'Solicitud de borrado: ${motivoCtrl.text}', fecha: DateTime.now()));
+                evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'Solicitud de borrado: ${motivoCtrl.text}$suffix', fecha: DateTime.now()));
+                if (fueraDePlazo) evento.logsTrazabilidad.add("⚠️ Solicitud de borrado FUERA DE PLAZO el ${DateTime.now()}");
               });
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Solicitud enviada a $otroNombre'), backgroundColor: Colors.orange));
@@ -764,128 +860,190 @@ class _CalendarTabState extends State<CalendarTab> {
             bool soyElSolicitante = evento.solicitanteCambio == miNombre;
 
             return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, top: 20, left: 20, right: 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(child: Text(evento.titulo, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.teal))),
-                      if (evento.estado == EstadoEvento.validado && !esObserver) // RBAC: Observer no borra
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.red),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _solicitarEliminacion(evento);
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 20), // Padding interno para que el scroll no corte el contenido
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(evento.titulo, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.teal))),
+                        if (evento.estado == EstadoEvento.validado && !esObserver) // RBAC: Observer no borra
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _solicitarEliminacion(evento);
+                            },
+                            tooltip: 'Solicitar Borrado',
+                          )
+                      ],
+                    ),
+                    Text('${evento.fecha.day}/${evento.fecha.month} a las ${evento.fecha.hour}:${evento.fecha.minute.toString().padLeft(2,'0')}', style: const TextStyle(fontSize: 16, color: Colors.grey)),
+                    const SizedBox(height: 10),
+                    
+                    // TU LISTTILE RESTAURADO
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.info_outline, color: Colors.teal),
+                      title: Text('Responsable: ${evento.responsable}'),
+                      subtitle: Text('Estado actual: ${evento.estado.name.toUpperCase()}'),
+                    ),
+                    const Divider(),
+              
+                    // JUGADA 2: VISUALIZACIÓN DE EVIDENCIA DOCUMENTAL
+                    if (evento.adjuntos.isNotEmpty) ...[
+                      const Text('📎 Evidencia Documental (Informes/Notas)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      const SizedBox(height: 5),
+                      SizedBox(
+                        height: 100, // Altura aumentada para que quepa el botón de borrar
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: evento.adjuntos.length,
+                          // 4. Evidencias Ampliables a Pantalla Completa (Zoom)
+                          itemBuilder: (ctx, i) {
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 10, right: 15),
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  GestureDetector(
+                                    onTap: () {
+                                      showDialog(
+                                        context: context,
+                                        builder: (ctx) => Dialog(
+                                          backgroundColor: Colors.black87,
+                                          insetPadding: EdgeInsets.zero,
+                                          child: Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              InteractiveViewer(child: kIsWeb ? Image.network(evento.adjuntos[i]) : Image.file(File(evento.adjuntos[i]))),
+                                              Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    child: Container(
+                                      width: 80, height: 80,
+                                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300), image: DecorationImage(image: kIsWeb ? NetworkImage(evento.adjuntos[i]) : FileImage(File(evento.adjuntos[i])) as ImageProvider, fit: BoxFit.cover)),
+                                    ),
+                                  ),
+                                  if (!esObserver)
+                                    Positioned(
+                                      top: -8,
+                                      right: -8,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setModalState(() {
+                                            evento.adjuntos.removeAt(i);
+                                            evento.logsTrazabilidad.add('🗑️ Evidencia eliminada por $miNombre el ${DateTime.now().toString().substring(0,16)}');
+                                          });
+                                        },
+                                        child: const CircleAvatar(radius: 14, backgroundColor: Colors.white, child: CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14))),
+                                      ),
+                                    )
+                                ],
+                              ),
+                            );
                           },
-                          tooltip: 'Solicitar Borrado',
-                        )
-                    ],
-                  ),
-                  Text('${evento.fecha.day}/${evento.fecha.month} a las ${evento.fecha.hour}:${evento.fecha.minute.toString().padLeft(2,'0')}', style: const TextStyle(fontSize: 16, color: Colors.grey)),
-                  const SizedBox(height: 10),
-                  
-                  // TU LISTTILE RESTAURADO
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.info_outline, color: Colors.teal),
-                    title: Text('Responsable: ${evento.responsable}'),
-                    subtitle: Text('Estado actual: ${evento.estado.name.toUpperCase()}'),
-                  ),
-                  const Divider(),
-
-                  // JUGADA 2: VISUALIZACIÓN DE EVIDENCIA DOCUMENTAL
-                  if (evento.adjuntos.isNotEmpty) ...[
-                    const Text('📎 Evidencia Documental (Informes/Notas)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                    const SizedBox(height: 5),
-                    SizedBox(
-                      height: 80,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: evento.adjuntos.length,
-                        itemBuilder: (ctx, i) => Container(
-                          width: 80, margin: const EdgeInsets.only(right: 8),
-                          decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300), image: DecorationImage(image: FileImage(File(evento.adjuntos[i])), fit: BoxFit.cover)),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  
-                  // Botón para añadir más evidencia (Solo si no es observer)
-                  if (!esObserver)
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final List<XFile> fotos = await ImagePicker().pickMultiImage();
-                        if (fotos.isNotEmpty) {
-                          setState(() { 
-                            evento.adjuntos.addAll(fotos.map((f) => f.path)); 
-                            evento.logsTrazabilidad.add('📎 ${fotos.length} documentos añadidos por $miNombre el ${DateTime.now().toString().substring(0,16)}');
-                          });
-                        }
-                      },
-                      icon: const Icon(Icons.add_a_photo, size: 16), label: const Text('Añadir Evidencia'), style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact)),
-
-                  if (haySolicitudBorrado)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.shade200)),
-                      child: Column(
-                        children: [
-                          Row(children: [
-                            const Icon(Icons.warning_amber_rounded, color: Colors.red),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(soyElSolicitante ? 'Has solicitado borrar este evento.' : '$otroNombre quiere borrar este evento.', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)))
-                          ]),
-                          const SizedBox(height: 5),
-                          Text('Motivo: "${evento.motivoSolicitud}"', style: const TextStyle(fontStyle: FontStyle.italic)),
-                          const SizedBox(height: 10),
-                          if (!soyElSolicitante) 
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                TextButton(onPressed: () {
-                                  setState(() {
-                                    evento.estado = EstadoEvento.validado; 
-                                    evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He rechazado la eliminación. El evento se mantiene.', fecha: DateTime.now()));
-                                    evento.solicitanteCambio = null;
-                                    evento.motivoSolicitud = null;
-                                  });
-                                  Navigator.pop(context);
-                                }, child: const Text('Rechazar', style: TextStyle(color: Colors.grey))),
-                                ElevatedButton(onPressed: () {
-                                  setState(() {
-                                    evento.estado = EstadoEvento.cancelado; 
-                                    evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He aceptado la eliminación.', fecha: DateTime.now()));
-                                  });
-                                  Navigator.pop(context);
-                                }, style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), child: const Text('Aceptar Eliminación')),
-                              ],
-                            )
-                          else
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  setState(() {
-                                    evento.estado = EstadoEvento.validado; 
-                                    evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He cancelado la solicitud. Al final el evento se mantiene.', fecha: DateTime.now()));
-                                    evento.solicitanteCambio = null;
-                                    evento.motivoSolicitud = null;
-                                  });
-                                  Navigator.pop(context);
-                                },
-                                icon: const Icon(Icons.restore, size: 18),
-                                label: const Text('Cancelar mi solicitud'),
-                                style: OutlinedButton.styleFrom(foregroundColor: Colors.teal, side: const BorderSide(color: Colors.teal)),
+                      const SizedBox(height: 10),
+                    ],
+                    
+                    // Botón para añadir más evidencia (Solo si no es observer)
+                    if (!esObserver)
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final List<XFile> fotos = await ImagePicker().pickMultiImage();
+                          if (fotos.isNotEmpty) {
+                            setModalState(() { 
+                              evento.adjuntos.addAll(fotos.map((f) => f.path)); 
+                              evento.logsTrazabilidad.add('📎 ${fotos.length} documentos añadidos por $miNombre el ${DateTime.now().toString().substring(0,16)}');
+                            });
+                          }
+                        },
+                        icon: const Icon(Icons.add_a_photo, size: 16), label: const Text('Añadir Evidencia'), style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact)),
+              
+                    if (haySolicitudBorrado)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.shade200)),
+                        child: Column(
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text(soyElSolicitante ? 'Has solicitado borrar este evento.' : '$otroNombre quiere borrar este evento.', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)))
+                            ]),
+                            const SizedBox(height: 5),
+                            Text('Motivo: "${evento.motivoSolicitud}"', style: const TextStyle(fontStyle: FontStyle.italic)),
+                            const SizedBox(height: 10),
+                            if (!soyElSolicitante) 
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  TextButton(onPressed: () {
+                                    setState(() {
+                                      // 1. Alerta Forense de "Fuera de Plazo"
+                                      bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
+                                      String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+                                      
+                                      evento.estado = EstadoEvento.validado; 
+                                      evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He rechazado la eliminación. El evento se mantiene.$suffix', fecha: DateTime.now()));
+                                      if (fueraDePlazo) evento.logsTrazabilidad.add("⚠️ Rechazo de eliminación FUERA DE PLAZO el ${DateTime.now()}");
+              
+                                      evento.solicitanteCambio = null;
+                                      evento.motivoSolicitud = null;
+                                    });
+                                    Navigator.pop(context);
+                                  }, child: const Text('Rechazar', style: TextStyle(color: Colors.grey))),
+                                  ElevatedButton(onPressed: () {
+                                    setState(() {
+                                      // 1. Alerta Forense de "Fuera de Plazo"
+                                      bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
+                                      String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+              
+                                      evento.estado = EstadoEvento.cancelado; 
+                                      evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He aceptado la eliminación.$suffix', fecha: DateTime.now()));
+                                      if (fueraDePlazo) evento.logsTrazabilidad.add("⚠️ Aceptación de eliminación FUERA DE PLAZO el ${DateTime.now()}");
+                                    });
+                                    Navigator.pop(context);
+                                  }, style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), child: const Text('Aceptar Eliminación')),
+                                ],
+                              )
+                            else
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      // 1. Alerta Forense de "Fuera de Plazo"
+                                      bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
+                                      String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+                                      
+                                      evento.estado = EstadoEvento.validado; 
+                                      evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He cancelado la solicitud. Al final el evento se mantiene.$suffix', fecha: DateTime.now()));
+                                      if (fueraDePlazo) evento.logsTrazabilidad.add("⚠️ Cancelación de solicitud FUERA DE PLAZO el ${DateTime.now()}");
+              
+                                      evento.solicitanteCambio = null;
+                                      evento.motivoSolicitud = null;
+                                    });
+                                    Navigator.pop(context);
+                                  },
+                                  icon: const Icon(Icons.restore, size: 18),
+                                  label: const Text('Cancelar mi solicitud'),
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.teal, side: const BorderSide(color: Colors.teal)),
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-
+              
                   // TRAZABILIDAD (LOGS)
                   if (evento.logsTrazabilidad.isNotEmpty) ...[
                     const SizedBox(height: 10),
@@ -896,7 +1054,7 @@ class _CalendarTabState extends State<CalendarTab> {
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: evento.logsTrazabilidad.map((log) => Text(log, style: const TextStyle(fontSize: 10, fontFamily: 'Monospace'))).toList()),
                     )
                   ],
-
+              
                   const SizedBox(height: 10),
                   const Text('Chat del Evento', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
@@ -952,6 +1110,7 @@ class _CalendarTabState extends State<CalendarTab> {
                     ),
                   )
                 ],
+                ),
               ),
             );
           }
@@ -977,8 +1136,8 @@ class _CalendarTabState extends State<CalendarTab> {
               // OPCIÓN 1: MES ACTUAL
               ListTile(
                 leading: const CircleAvatar(backgroundColor: Colors.teal, child: Icon(Icons.calendar_view_month, color: Colors.white)),
-                title: const Text('Mes Actual (Visual)'),
-                subtitle: const Text('Genera una hoja con el mes en curso'),
+                title: const Text('Mes Actual'),
+                subtitle: const Text('Calendario visual incluyendo anexo de trazabilidad'),
                 onTap: () {
                   Navigator.pop(ctx);
                   final now = DateTime.now();
@@ -1009,6 +1168,23 @@ class _CalendarTabState extends State<CalendarTab> {
                   }
                 },
               ),
+
+              const Divider(),
+
+              // OPCIÓN 3: INFORME LEGAL DETALLADO (EL BUENO)
+              ListTile(
+                leading: const CircleAvatar(backgroundColor: Colors.indigo, child: Icon(Icons.gavel, color: Colors.white)),
+                title: const Text('Informe Forense Detallado'),
+                subtitle: const Text('Tabla con historial de chat y trazabilidad completa'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  // Recogemos todos los eventos aplanando la lista
+                  List<Evento> todosLosEventos = _eventos.values.expand((e) => e).toList();
+                  
+                  // LLAMAMOS A LA TABLA LEGAL (y le pasamos la auditoría)
+                  PdfService().exportarInformeAgenda(context, todosLosEventos, null, _registroAuditoria);
+                },
+              ),
             ],
           ),
         );
@@ -1020,7 +1196,7 @@ class _CalendarTabState extends State<CalendarTab> {
     // Convertimos el mapa de eventos a lista plana
     List<Evento> todosLosEventos = _eventos.values.expand((e) => e).toList();
     // Llamamos al nuevo servicio visual
-    PdfService().exportarCalendarioVisual(context, todosLosEventos, rango, _getCustodio);
+    PdfService().exportarCalendarioVisual(context, todosLosEventos, rango, _getCustodio, _registroAuditoria);
   }
 
   // Helper para cambiar rol (Demo)
@@ -1139,7 +1315,8 @@ class _CalendarTabState extends State<CalendarTab> {
                     onPressed: _registrarCheckInGPS,
                   ),
                   
-                if (_getCustodio(_selectedDay!) != miNombre && _rolUsuario != 'observer')
+                // 2. Botón de Intercambio en Días Propios (Simplificación de Lógica)
+                if (_rolUsuario != 'observer')
                   IconButton(
                     icon: const Icon(Icons.swap_horiz, color: Colors.teal),
                     tooltip: 'Solicitar Cambio',
@@ -1181,6 +1358,8 @@ class _CalendarTabState extends State<CalendarTab> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('${evento.fecha.hour}:${evento.fecha.minute.toString().padLeft(2,'0')} - Resp: ${evento.responsable}'),
+                            // REQ 1: Mostrar niños implicados
+                            if (evento.ninosAsignados.isNotEmpty) Text('Para: ${evento.ninosAsignados.join(", ")}', style: const TextStyle(color: Colors.teal, fontSize: 11, fontWeight: FontWeight.bold)),
                             if (esPendiente) const Text('⚠️ Pendiente de aprobación (Fuera de turno)', style: TextStyle(color: Colors.deepOrange, fontSize: 11, fontWeight: FontWeight.bold)),
                             if (esSolicitudBorrado) Text('🚨 SOLICITUD DE BORRADO: ${evento.motivoSolicitud}', style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
                             if (esCancelado) const Text('❌ EVENTO CANCELADO', style: TextStyle(color: Colors.grey, fontSize: 11, fontStyle: FontStyle.italic)),

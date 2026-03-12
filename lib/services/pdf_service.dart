@@ -199,7 +199,7 @@ class PdfService {
   }
 
   /// Exporta el PDF de la Agenda con diseño profesional
-  Future<void> exportarInformeAgenda(BuildContext context, List<Evento> eventos, DateTimeRange? periodo) async {
+  Future<void> exportarInformeAgenda(BuildContext context, List<Evento> eventos, DateTimeRange? periodo, List<String> registroAuditoria) async {
     showDialog(
       context: context, 
       barrierDismissible: false,
@@ -227,6 +227,14 @@ class PdfService {
 
       // Ordenamos los eventos por fecha para que el informe sea cronológico
       eventos.sort((a, b) => a.fecha.compareTo(b.fecha));
+
+      // NUEVO: Consolidamos logs globales de custodia con logs de eventos individuales para el Anexo
+      List<String> logsAnexo = List.from(registroAuditoria);
+      for (var e in eventos) {
+        for (var log in e.logsTrazabilidad) {
+          logsAnexo.add('Evento ${e.fecha.day}/${e.fecha.month} "${e.titulo}": $log');
+        }
+      }
 
       pdf.addPage(
         pw.MultiPage(
@@ -335,6 +343,11 @@ class PdfService {
                       for(var log in e.logsTrazabilidad) estadoTexto += '\n$log';
                     }
 
+                    if (e.chat.isNotEmpty) {
+                      estadoTexto += '\n\n--- HISTORIAL DE CHAT ---';
+                      for (var msg in e.chat) estadoTexto += '\n[${msg.fecha.day}/${msg.fecha.month} ${msg.fecha.hour}:${msg.fecha.minute.toString().padLeft(2,'0')}] ${msg.autor}: ${msg.texto}';
+                    }
+
                     return [
                       '$fechaStr\n$horaStr',
                       '${e.titulo}\nCreado por: ${e.creador}',
@@ -357,6 +370,37 @@ class PdfService {
                     4: const pw.FlexColumnWidth(1.5),
                   }
                 ),
+
+              // --- ANEXO FORENSE: REGISTRO DE ALTERACIONES ---
+              pw.SizedBox(height: 30),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey400),
+                  color: PdfColors.grey100,
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('ANEXO FORENSE: REGISTRO DE ALTERACIONES Y TRAZABILIDAD', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
+                    pw.Divider(color: PdfColors.grey400),
+                    if (logsAnexo.isEmpty)
+                      pw.Text("No se han registrado movimientos forenses ni alteraciones.", style: pw.TextStyle(color: PdfColors.grey700, fontStyle: pw.FontStyle.italic, fontSize: 10))
+                    else
+                      ...logsAnexo.map((log) => pw.Padding(
+                        padding: const pw.EdgeInsets.only(bottom: 4),
+                        child: pw.Row(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text('• ', style: pw.TextStyle(color: PdfColors.black, fontWeight: pw.FontWeight.bold, fontSize: 9)),
+                            pw.Expanded(child: pw.Text(log, style: const pw.TextStyle(fontSize: 9))),
+                          ]
+                        )
+                      )).toList()
+                  ]
+                )
+              ),
             ];
           },
         ),
@@ -373,7 +417,7 @@ class PdfService {
   }
 
   /// --- NUEVO: EXPORTACIÓN VISUAL DE CALENDARIO (GRID) ---
-  Future<void> exportarCalendarioVisual(BuildContext context, List<Evento> eventos, DateTimeRange periodo, String Function(DateTime) calcularCustodia) async {
+  Future<void> exportarCalendarioVisual(BuildContext context, List<Evento> eventos, DateTimeRange periodo, String Function(DateTime) calcularCustodia, List<String> registroAuditoria) async {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -389,6 +433,17 @@ class PdfService {
 
       final ahora = DateTime.now();
       final fechaFirma = '${ahora.day.toString().padLeft(2, '0')}/${ahora.month.toString().padLeft(2, '0')}/${ahora.year}';
+
+      // Ordenamos cronológicamente para que los logs del pie de página salgan en orden
+      eventos.sort((a, b) => a.fecha.compareTo(b.fecha));
+
+      // NUEVO: Consolidamos logs globales de custodia con logs de eventos para el Visual también
+      List<String> logsAnexo = List.from(registroAuditoria);
+      for (var e in eventos) {
+        for (var log in e.logsTrazabilidad) {
+          logsAnexo.add('Evento ${e.fecha.day}/${e.fecha.month} "${e.titulo}": $log');
+        }
+      }
 
       // 1. Generar lista de meses dentro del rango
       List<DateTime> mesesAImprimir = [];
@@ -409,7 +464,7 @@ class PdfService {
               return pw.Column(
                 children: [
                   // El calendario ocupa todo el espacio disponible
-                  pw.Expanded(child: _construirPaginaMes(mes, eventos, calcularCustodia)),
+                  pw.Expanded(child: _construirPaginaMes(mes, eventos, calcularCustodia, logsAnexo)),
                   
                   // PIE DE PÁGINA PROFESIONAL (Idéntico a FinanceTab)
                   pw.Container(
@@ -464,7 +519,7 @@ class PdfService {
     }
   }
 
-  pw.Widget _construirPaginaMes(DateTime mes, List<Evento> todosEventos, String Function(DateTime) calcularCustodia) {
+  pw.Widget _construirPaginaMes(DateTime mes, List<Evento> todosEventos, String Function(DateTime) calcularCustodia, List<String> logsAnexo) {
     final diasEnMes = DateUtils.getDaysInMonth(mes.year, mes.month);
     final primerDiaSemana = DateTime(mes.year, mes.month, 1).weekday; // 1 = Lunes, 7 = Domingo
     
@@ -570,7 +625,38 @@ class PdfService {
         pw.Row(mainAxisAlignment: pw.MainAxisAlignment.center, children: [
           pw.Container(width: 10, height: 10, color: PdfColors.blue50), pw.SizedBox(width: 5), pw.Text("Turno Alberto", style: const pw.TextStyle(fontSize: 8)), pw.SizedBox(width: 15),
           pw.Container(width: 10, height: 10, color: PdfColors.orange50), pw.SizedBox(width: 5), pw.Text("Turno Yaiza", style: const pw.TextStyle(fontSize: 8)),
-        ])
+        ]),
+
+        // --- ANEXO FORENSE EN CALENDARIO VISUAL ---
+        pw.SizedBox(height: 10),
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.all(6),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey300),
+            color: PdfColors.grey50,
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text('ANEXO FORENSE: REGISTRO DE ALTERACIONES Y TRAZABILIDAD', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
+              pw.SizedBox(height: 2),
+              if (logsAnexo.isEmpty)
+                pw.Text("No se han registrado movimientos forenses ni alteraciones.", style: pw.TextStyle(color: PdfColors.grey700, fontStyle: pw.FontStyle.italic, fontSize: 7))
+              else
+                ...logsAnexo.map((log) => pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 1),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('• ', style: pw.TextStyle(color: PdfColors.black, fontWeight: pw.FontWeight.bold, fontSize: 6)),
+                      pw.Expanded(child: pw.Text(log, style: const pw.TextStyle(fontSize: 6))),
+                    ]
+                  )
+                )).toList()
+            ]
+          )
+        ),
       ]
     );
   }
