@@ -82,6 +82,32 @@ class Gasto {
   bool get estaPagado => cantidadPagada >= miParte;
 }
 
+// --- BASE DE DATOS EN MEMORIA (GLOBAL) ---
+// Al sacarla fuera del Widget, persiste aunque cambies de pestaña
+List<Gasto> baseDatosGastosGlobal = [
+  Gasto(
+    titulo: 'Dentista Ivy', total: 120.0, miParte: 60.0, porcentaje: 50.0, soyDeudor: false, creador: 'Alberto',
+    categoria: 'Salud', fecha: DateTime.now().subtract(const Duration(days: 1)), esRecurrente: false, esExtraordinario: true, ninosAsignados: ['Ivy'], cantidadPagada: 20.0,
+  ),
+  Gasto(
+    titulo: 'Zapatillas Marca', total: 80.0, miParte: 40.0, porcentaje: 50.0, soyDeudor: false, creador: 'Alberto',
+    categoria: 'Ropa', fecha: DateTime.now().subtract(const Duration(days: 2)), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Viggo'], enDisputa: true,
+    creadorDisputa: 'Yaiza',
+    hiloDisputa: [MensajeDisputa(autor: 'Yaiza', texto: 'No acordamos comprar zapatillas tan caras. Te pago 20€ como si fueran del Decathlon.', fecha: DateTime.now())]
+  ),
+  Gasto(
+    titulo: 'Academia Inglés', total: 50.0, miParte: 16.5, porcentaje: 33.0, soyDeudor: true, creador: 'Yaiza',
+    categoria: 'Educación', fecha: DateTime.now().subtract(const Duration(days: 5)), esRecurrente: true, esExtraordinario: false, ninosAsignados: ['Viggo', 'Ivy'],
+    fechaLimite: DateTime.now().add(const Duration(days: 3))
+  ),
+  // --- CASO DE PRUEBA PARA VALIDACIÓN ---
+  Gasto(
+    titulo: 'Prueba Validación', total: 100.0, miParte: 50.0, porcentaje: 50.0, soyDeudor: false, creador: 'Alberto',
+    categoria: 'Ocio', fecha: DateTime.now(), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Viggo'],
+    pagoPendienteValidacion: 50.0,
+  ),
+];
+
 class FinanceTab extends StatefulWidget {
   const FinanceTab({super.key});
 
@@ -106,29 +132,8 @@ class _FinanceTabState extends State<FinanceTab> {
   @override
   void initState() {
     super.initState();
-    listaGastos = [
-      Gasto(
-        titulo: 'Dentista Ivy', total: 120.0, miParte: 60.0, porcentaje: 50.0, soyDeudor: false, creador: miNombreReal, 
-        categoria: 'Salud', fecha: DateTime.now().subtract(const Duration(days: 1)), esRecurrente: false, esExtraordinario: true, ninosAsignados: ['Ivy'], cantidadPagada: 20.0, 
-      ),
-      Gasto(
-        titulo: 'Zapatillas Marca', total: 80.0, miParte: 40.0, porcentaje: 50.0, soyDeudor: false, creador: miNombreReal, 
-        categoria: 'Ropa', fecha: DateTime.now().subtract(const Duration(days: 2)), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Viggo'], enDisputa: true, 
-        creadorDisputa: 'Yaiza', // Precargamos a Yaiza como creadora de la queja
-        hiloDisputa: [MensajeDisputa(autor: 'Yaiza', texto: 'No acordamos comprar zapatillas tan caras. Te pago 20€ como si fueran del Decathlon.', fecha: DateTime.now())]
-      ),
-      Gasto(
-        titulo: 'Academia Inglés', total: 50.0, miParte: 16.5, porcentaje: 33.0, soyDeudor: true, creador: nombreOtroProgenitor, 
-        categoria: 'Educación', fecha: DateTime.now().subtract(const Duration(days: 5)), esRecurrente: true, esExtraordinario: false, ninosAsignados: ['Viggo', 'Ivy'],
-        fechaLimite: DateTime.now().add(const Duration(days: 3)) 
-      ),
-      // --- CASO DE PRUEBA PARA VALIDACIÓN ---
-      Gasto(
-        titulo: 'Prueba Validación', total: 100.0, miParte: 50.0, porcentaje: 50.0, soyDeudor: false, creador: miNombreReal, // Tú eres el acreedor
-        categoria: 'Ocio', fecha: DateTime.now(), esRecurrente: false, esExtraordinario: false, ninosAsignados: ['Viggo'],
-        pagoPendienteValidacion: 50.0, // <--- AQUÍ ESTÁ EL DINERO EN EL LIMBO
-      ),
-    ];
+    // CONECTAMOS CON LA "BASE DE DATOS GLOBAL"
+    listaGastos = baseDatosGastosGlobal;
   }
 
   // BUG 3: Lapsus del Céntimo - Helper para sanear doubles
@@ -184,8 +189,11 @@ class _FinanceTabState extends State<FinanceTab> {
                 const SizedBox(height: 15),
                 OutlinedButton.icon(
                   onPressed: () async { 
-                    final XFile? foto = await ImagePicker().pickImage(source: ImageSource.gallery); 
-                    if (foto != null) { setModalState(() { justificanteTmp = foto.path; }); } 
+                    final XFile? foto = await ImagePicker().pickImage(source: ImageSource.gallery);
+                    if (foto != null) {
+                      if (kIsWeb) await Future.delayed(const Duration(milliseconds: 300)); // Blindaje Web
+                      setModalState(() { justificanteTmp = foto.path; });
+                    }
                   },
                   icon: Icon(justificanteTmp != null ? Icons.check_circle : Icons.receipt_long, color: justificanteTmp != null ? Colors.green : Colors.blueGrey), 
                   label: Text(justificanteTmp != null ? 'Recibo subido' : 'Subir pantallazo Bizum/Banco', style: const TextStyle(fontSize: 12)),
@@ -385,7 +393,13 @@ class _FinanceTabState extends State<FinanceTab> {
                   const SizedBox(height: 10),
                   
                   OutlinedButton.icon(
-                    onPressed: () async { final XFile? foto = await ImagePicker().pickImage(source: ImageSource.gallery); if (foto != null) { setModalState(() { rutaJustificante = foto.path; }); } },
+                    onPressed: () async { 
+                      final XFile? foto = await ImagePicker().pickImage(source: ImageSource.gallery); 
+                      if (foto != null) { 
+                        if (kIsWeb) await Future.delayed(const Duration(milliseconds: 300));
+                        setModalState(() { rutaJustificante = foto.path; }); 
+                      } 
+                    },
                     icon: Icon(rutaJustificante != null ? Icons.check_circle : Icons.camera_alt, color: rutaJustificante != null ? Colors.green : Colors.blueGrey),
                     label: Text(rutaJustificante != null ? 'Justificante Adjuntado' : 'Subir Justificante del Pago Total'),
                     style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 45)),
@@ -687,25 +701,42 @@ class _FinanceTabState extends State<FinanceTab> {
 
                 const SizedBox(height: 10),
                 if (gasto.rutasAdjuntos.isNotEmpty) SizedBox(height: 120, child: ListView.builder(scrollDirection: Axis.horizontal, itemCount: gasto.rutasAdjuntos.length, itemBuilder: (ctx, i) { 
-                  return GestureDetector(
-                    onTap: () {
-                      showDialog(
-                        context: context,
-                        builder: (ctx) => Dialog(
-                          backgroundColor: Colors.black,
-                          insetPadding: EdgeInsets.zero,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              InteractiveViewer(child: kIsWeb ? Image.network(gasto.rutasAdjuntos[i]) : Image.file(File(gasto.rutasAdjuntos[i]))),
-                              Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
-                            ],
-                          ),
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 12.0, top: 8.0),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => Dialog(
+                                backgroundColor: Colors.black,
+                                insetPadding: EdgeInsets.zero,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    InteractiveViewer(child: kIsWeb ? Image.network(gasto.rutasAdjuntos[i]) : Image.file(File(gasto.rutasAdjuntos[i]))),
+                                    Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                          child: Container(width: 120, height: 120, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300), image: DecorationImage(image: kIsWeb ? NetworkImage(gasto.rutasAdjuntos[i]) as ImageProvider : FileImage(File(gasto.rutasAdjuntos[i])), fit: BoxFit.cover)))
                         ),
-                      );
-                    },
-                    child: Container(width: 120, margin: const EdgeInsets.only(right: 10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300), image: DecorationImage(image: kIsWeb ? NetworkImage(gasto.rutasAdjuntos[i]) as ImageProvider : FileImage(File(gasto.rutasAdjuntos[i])), fit: BoxFit.cover)))
-                  ); 
+                        if (gasto.creador == miNombreReal && !gasto.estaPagado && !gasto.enDisputa)
+                          Positioned(
+                            top: -8,
+                            right: -8,
+                            child: GestureDetector(
+                              onTap: () => setModalState(() => gasto.rutasAdjuntos.removeAt(i)),
+                              child: const CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14)),
+                            ),
+                          )
+                      ],
+                    ),
+                  );
                 })),
                 const SizedBox(height: 20),
 
@@ -944,7 +975,8 @@ class _FinanceTabState extends State<FinanceTab> {
                     OutlinedButton.icon(
                       onPressed: () async { 
                         final List<XFile> fotos = await ImagePicker().pickMultiImage(); 
-                        if (fotos.isNotEmpty) { 
+                        if (fotos.isNotEmpty) {
+                          if (kIsWeb) await Future.delayed(const Duration(milliseconds: 300));
                           setModalState(() { rutasFotosTemporales.addAll(fotos.map((f) => f.path)); }); 
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('📸 ${fotos.length} adjuntos añadidos'), backgroundColor: Colors.teal)); 
                         } 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:image_picker/image_picker.dart'; // Añadido para Evidencia Documental
 import '../services/pdf_service.dart'; // Añadido para el pilar de exportación
+import '../screens/finance_tab.dart'; // IMPORTANTE: Para acceder a baseDatosGastosGlobal
 
 // 1. MODELO DE DATOS (Lo definimos aquí para simular la BD)
 enum EstadoEvento { validado, pendiente, solicitudEliminacion, cancelado }
@@ -34,6 +35,8 @@ class Evento {
   List<String> adjuntos; // Rutas de fotos (informes médicos, notas...)
   List<String> logsTrazabilidad; // "10:00 - Check-in GPS", "10:05 - Foto subida"
   final List<String> ninosAsignados; // REQ 1: Metadato de Niños Implicados
+  String? idGastoAsociado;
+  List<String> ticketsGasto; // 📸 NUEVO: Memoria visual de los tickets en el evento
 
   Evento({
     required this.titulo,
@@ -50,8 +53,13 @@ class Evento {
     List<String>? adjuntos,
     List<String>? logsTrazabilidad,
     List<String>? ninosAsignados,
-  }) : chat = chat ?? [], adjuntos = adjuntos ?? [], logsTrazabilidad = logsTrazabilidad ?? [], ninosAsignados = ninosAsignados ?? [];
+    this.idGastoAsociado,
+    List<String>? ticketsGasto,
+  }) : chat = chat ?? [], adjuntos = adjuntos ?? [], logsTrazabilidad = logsTrazabilidad ?? [], ninosAsignados = ninosAsignados ?? [], ticketsGasto = ticketsGasto ?? [];
 }
+
+// --- BASE DE DATOS EVENTOS (GLOBAL) ---
+Map<DateTime, List<Evento>>? baseDatosEventosGlobal;
 
 class CalendarTab extends StatefulWidget {
   const CalendarTab({super.key});
@@ -98,6 +106,12 @@ class _CalendarTabState extends State<CalendarTab> {
   }
 
   void _inicializarEventos() {
+    // Si ya existen datos en memoria global, los usamos en lugar de reiniciar
+    if (baseDatosEventosGlobal != null) {
+      _eventos = baseDatosEventosGlobal!;
+      return;
+    }
+
     final hoy = DateTime.now();
     _eventos = {
       DateTime.utc(hoy.year, hoy.month, hoy.day + 1): [
@@ -111,6 +125,9 @@ class _CalendarTabState extends State<CalendarTab> {
         Evento(titulo: 'Cumpleaños Abuela', fecha: hoy.add(const Duration(days: 5)), categoria: 'Ocio', creador: 'Alberto', responsable: 'Alberto', estado: EstadoEvento.solicitudEliminacion, solicitanteCambio: 'Alberto', motivoSolicitud: 'Se ha pospuesto por enfermedad', chat: [MensajeCalendario(autor: 'Alberto', texto: 'Lo siento, la abuela está mala, mejor lo quitamos.', fecha: DateTime.now())]),
       ],
     };
+    
+    // Guardamos la referencia global
+    baseDatosEventosGlobal = _eventos;
   }
 
   List<Evento> _getEventosDelDia(DateTime dia) {
@@ -169,11 +186,29 @@ class _CalendarTabState extends State<CalendarTab> {
     const long = -3.703790;
     
     // 2. Crear el log de trazabilidad
-    String log = '📍 ${ahora.hour}:${ahora.minute.toString().padLeft(2,"0")}h - Check-in GPS: Lat $lat, Long $long (Precisión: 12m)';
+    String log = '📍 ${ahora.hour}:${ahora.minute.toString().padLeft(2,"0")}h - Check-in GPS: Lat $lat, Long $long (Precisión: 12m) realizado por $miNombre';
     
     setState(() {
-      // Añadimos este log a un evento especial del día o a una lista general del día
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(log), backgroundColor: Colors.green));
+      // AHORA: Creamos un evento "Técnico" para que quede constancia en el PDF
+      final key = DateTime.utc(ahora.year, ahora.month, ahora.day);
+      
+      final checkInEvento = Evento(
+        titulo: '📍 REGISTRO DE PRESENCIA (GPS)',
+        fecha: ahora,
+        categoria: 'Otro', // Usamos 'Otro' para diferenciarlo de Médico/Escuela
+        creador: miNombre,
+        responsable: miNombre,
+        estado: EstadoEvento.validado, // Nace validado porque es una prueba técnica irrefutable
+        logsTrazabilidad: [log, 'Dispositivo ID: KND-USER-${miNombre.toUpperCase()}-001'], // Datos forenses
+      );
+
+      if (_eventos[key] != null) {
+        _eventos[key]!.add(checkInEvento);
+      } else {
+        _eventos[key] = [checkInEvento];
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Check-in guardado en el informe forense'), backgroundColor: Colors.indigo));
     });
   }
 
@@ -270,9 +305,14 @@ class _CalendarTabState extends State<CalendarTab> {
                   // JUGADA 2: BOTÓN ADJUNTAR EVIDENCIA
                   OutlinedButton.icon(
                     onPressed: () async {
-                      final List<XFile> fotos = await ImagePicker().pickMultiImage();
-                      if (fotos.isNotEmpty) {
-                        setModalState(() => rutasAdjuntos.addAll(fotos.map((f) => f.path)));
+                      try {
+                        final List<XFile> fotos = await ImagePicker().pickMultiImage();
+                        if (fotos.isNotEmpty) {
+                          if (kIsWeb) await Future.delayed(const Duration(milliseconds: 300)); // Fix congelamiento Web
+                          setModalState(() => rutasAdjuntos.addAll(fotos.map((f) => f.path)));
+                        }
+                      } catch (e) {
+                        debugPrint('Error al adjuntar: $e');
                       }
                     },
                     icon: const Icon(Icons.attach_file),
@@ -337,7 +377,7 @@ class _CalendarTabState extends State<CalendarTab> {
                       if (hayColisionFutura) {
                         // Warning Forense
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text('⚠️ ALERTA FORENSE: Este evento invade el tiempo de custodia del otro progenitor. Se requiere su validación.'),
+                          content: Text('ALERTA FORENSE: Este evento invade el tiempo de custodia del otro progenitor. Se requiere su validación.'),
                           backgroundColor: Colors.deepOrange,
                           duration: Duration(seconds: 4),
                         ));
@@ -823,13 +863,13 @@ class _CalendarTabState extends State<CalendarTab> {
               setState(() {
                 // 1. Alerta Forense de "Fuera de Plazo"
                 bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
-                String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+                String suffix = fueraDePlazo ? " [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
 
                 evento.estado = EstadoEvento.solicitudEliminacion;
                 evento.solicitanteCambio = miNombre;
                 evento.motivoSolicitud = motivoCtrl.text;
                 evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'Solicitud de borrado: ${motivoCtrl.text}$suffix', fecha: DateTime.now()));
-                if (fueraDePlazo) evento.logsTrazabilidad.add("⚠️ Solicitud de borrado FUERA DE PLAZO el ${DateTime.now()}");
+                if (fueraDePlazo) evento.logsTrazabilidad.add("Solicitud de borrado FUERA DE PLAZO el ${DateTime.now()}");
               });
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Solicitud enviada a $otroNombre'), backgroundColor: Colors.orange));
@@ -959,12 +999,17 @@ class _CalendarTabState extends State<CalendarTab> {
                     if (!esObserver)
                       OutlinedButton.icon(
                         onPressed: () async {
-                          final List<XFile> fotos = await ImagePicker().pickMultiImage();
-                          if (fotos.isNotEmpty) {
-                            setModalState(() { 
-                              evento.adjuntos.addAll(fotos.map((f) => f.path)); 
-                              evento.logsTrazabilidad.add('📎 ${fotos.length} documentos añadidos por $miNombre el ${DateTime.now().toString().substring(0,16)}');
-                            });
+                          try {
+                            final List<XFile> fotos = await ImagePicker().pickMultiImage();
+                            if (fotos.isNotEmpty) {
+                              if (kIsWeb) await Future.delayed(const Duration(milliseconds: 300));
+                              setModalState(() { 
+                                evento.adjuntos.addAll(fotos.map((f) => f.path)); 
+                                evento.logsTrazabilidad.add('📎 ${fotos.length} documentos añadidos por $miNombre el ${DateTime.now().toString().substring(0,16)}');
+                              });
+                            }
+                          } catch (e) {
+                            debugPrint('Error: $e');
                           }
                         },
                         icon: const Icon(Icons.add_a_photo, size: 16), label: const Text('Añadir Evidencia'), style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact)),
@@ -991,7 +1036,7 @@ class _CalendarTabState extends State<CalendarTab> {
                                     setState(() {
                                       // 1. Alerta Forense de "Fuera de Plazo"
                                       bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
-                                      String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+                                      String suffix = fueraDePlazo ? " [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
                                       
                                       evento.estado = EstadoEvento.validado; 
                                       evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He rechazado la eliminación. El evento se mantiene.$suffix', fecha: DateTime.now()));
@@ -1006,7 +1051,7 @@ class _CalendarTabState extends State<CalendarTab> {
                                     setState(() {
                                       // 1. Alerta Forense de "Fuera de Plazo"
                                       bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
-                                      String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+                                      String suffix = fueraDePlazo ? " [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
               
                                       evento.estado = EstadoEvento.cancelado; 
                                       evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He aceptado la eliminación.$suffix', fecha: DateTime.now()));
@@ -1024,11 +1069,11 @@ class _CalendarTabState extends State<CalendarTab> {
                                     setState(() {
                                       // 1. Alerta Forense de "Fuera de Plazo"
                                       bool fueraDePlazo = DateTime.now().isAfter(evento.fecha);
-                                      String suffix = fueraDePlazo ? " 🚨 [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
+                                      String suffix = fueraDePlazo ? " [ALERTA FORENSE: Acción realizada FUERA DE PLAZO. El evento ya había finalizado]." : "";
                                       
                                       evento.estado = EstadoEvento.validado; 
                                       evento.chat.add(MensajeCalendario(autor: miNombre, texto: 'He cancelado la solicitud. Al final el evento se mantiene.$suffix', fecha: DateTime.now()));
-                                      if (fueraDePlazo) evento.logsTrazabilidad.add("⚠️ Cancelación de solicitud FUERA DE PLAZO el ${DateTime.now()}");
+                                      if (fueraDePlazo) evento.logsTrazabilidad.add("Cancelación de solicitud FUERA DE PLAZO el ${DateTime.now()}");
               
                                       evento.solicitanteCambio = null;
                                       evento.motivoSolicitud = null;
@@ -1055,6 +1100,256 @@ class _CalendarTabState extends State<CalendarTab> {
                     )
                   ],
               
+                  const SizedBox(height: 15),
+                  
+                  // ENLACE CON GASTOS (TRAZABILIDAD ECONÓMICA)
+                  if (evento.idGastoAsociado == null)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        TextEditingController importeCtrl = TextEditingController();
+                        TextEditingController conceptoCtrl = TextEditingController(text: evento.titulo);
+                        List<String> ticketsGasto = [];
+
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                          builder: (dCtx) {
+                            return StatefulBuilder(
+                              builder: (innerContext, setSheetState) {
+                                return Padding(
+                                  padding: EdgeInsets.only(bottom: MediaQuery.of(innerContext).viewInsets.bottom, top: 20, left: 20, right: 20),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('Generar Gasto Compartido', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
+                                      const SizedBox(height: 10),
+                                      const Text('Se creará un registro en Finanzas vinculado a este evento.', style: TextStyle(color: Colors.grey)),
+                                      const SizedBox(height: 20),
+                                      TextField(
+                                        controller: conceptoCtrl,
+                                        decoration: const InputDecoration(labelText: 'Concepto', border: OutlineInputBorder(), prefixIcon: Icon(Icons.description)),
+                                      ),
+                                      const SizedBox(height: 15),
+                                      TextField(
+                                        controller: importeCtrl,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        decoration: const InputDecoration(labelText: 'Importe (€)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.euro)),
+                                      ),
+                                      const SizedBox(height: 15),
+                                      OutlinedButton.icon(
+                                        onPressed: () async {
+                                          try {
+                                            final List<XFile> fotos = await ImagePicker().pickMultiImage();
+                                            if (kIsWeb) await Future.delayed(const Duration(milliseconds: 500));
+                                            if (fotos.isNotEmpty) {
+                                              setSheetState(() {
+                                                ticketsGasto.addAll(fotos.map((f) => f.path));
+                                              });
+                                            }
+                                          } catch (e) {
+                                            debugPrint('Error picker: $e');
+                                          }
+                                        },
+                                        icon: const Icon(Icons.camera_alt),
+                                        label: Text(ticketsGasto.isEmpty ? 'Adjuntar Tickets/Facturas' : '${ticketsGasto.length} Tickets adjuntos'),
+                                      ),
+                                      if (ticketsGasto.isNotEmpty) ...[
+                                        const SizedBox(height: 15),
+                                        SizedBox(
+                                          height: 80,
+                                          child: ListView.builder(
+                                            scrollDirection: Axis.horizontal,
+                                            itemCount: ticketsGasto.length,
+                                            itemBuilder: (ctx, i) {
+                                              return Padding(
+                                                padding: const EdgeInsets.only(right: 12.0, top: 8.0),
+                                                child: Stack(
+                                                  clipBehavior: Clip.none,
+                                                  children: [
+                                                    GestureDetector(
+                                                      onTap: () {
+                                                        showDialog(
+                                                          context: context,
+                                                          builder: (ctx) => Dialog(
+                                                            backgroundColor: Colors.black87,
+                                                            insetPadding: EdgeInsets.zero,
+                                                            child: Stack(
+                                                              alignment: Alignment.center,
+                                                              children: [
+                                                                InteractiveViewer(
+                                                                  child: kIsWeb 
+                                                                    ? Image.network(ticketsGasto[i], errorBuilder: (c,e,s) => const Icon(Icons.broken_image, color: Colors.white, size: 50)) 
+                                                                    : Image.file(File(ticketsGasto[i]), errorBuilder: (c,e,s) => const Icon(Icons.broken_image, color: Colors.white, size: 50))
+                                                                ),
+                                                                Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        );
+                                                      },
+                                                      child: Container(
+                                                        width: 80, height: 80,
+                                                        decoration: BoxDecoration(
+                                                          borderRadius: BorderRadius.circular(8),
+                                                          border: Border.all(color: Colors.grey.shade300),
+                                                        ),
+                                                        child: ClipRRect(
+                                                          borderRadius: BorderRadius.circular(8),
+                                                          child: kIsWeb 
+                                                            ? Image.network(ticketsGasto[i], fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.image_not_supported, color: Colors.grey)) 
+                                                            : Image.file(File(ticketsGasto[i]), fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.image_not_supported, color: Colors.grey)),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    Positioned(
+                                                      top: -8,
+                                                      right: -8,
+                                                      child: GestureDetector(
+                                                        onTap: () => setSheetState(() => ticketsGasto.removeAt(i)),
+                                                        child: const CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14)),
+                                                      ),
+                                                    )
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        )
+                                      ],
+                                      const SizedBox(height: 25),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton(
+                                          onPressed: () {
+                                            if (importeCtrl.text.isNotEmpty) {
+                                              String catFinanzas = 'Otro';
+                                              if (evento.categoria == 'Médico') catFinanzas = 'Salud';
+                                              if (evento.categoria == 'Escuela') catFinanzas = 'Educación';
+                                              if (evento.categoria == 'Ocio') catFinanzas = 'Ocio';
+
+                                              double total = double.tryParse(importeCtrl.text.replaceAll(',', '.')) ?? 0.0;
+                                              
+                                              final nuevoGasto = Gasto(
+                                                titulo: conceptoCtrl.text,
+                                                total: total,
+                                                miParte: total / 2, 
+                                                porcentaje: 50.0,
+                                                soyDeudor: false,
+                                                creador: miNombre,
+                                                categoria: catFinanzas,
+                                                fecha: evento.fecha,
+                                                esRecurrente: false,
+                                                esExtraordinario: false,
+                                                ninosAsignados: evento.ninosAsignados,
+                                                rutasAdjuntos: ticketsGasto,
+                                                enDisputa: false,
+                                                esCobroIntegro: false
+                                              );
+
+                                              baseDatosGastosGlobal.insert(0, nuevoGasto);
+
+                                              setModalState(() {
+                                                evento.idGastoAsociado = 'GASTO-PENDIENTE';
+                                                evento.logsTrazabilidad.add("💸 Gasto de ${importeCtrl.text}€ generado con ${ticketsGasto.length} tickets adjuntos el ${DateTime.now().toString().substring(0,16)}");
+                                                evento.ticketsGasto = List.from(ticketsGasto);
+                                              });
+                                              setState(() {
+                                                _registroAuditoria.add("💸 Evento '${evento.titulo}': Gasto de ${importeCtrl.text}€ generado con evidencia.");
+                                              });
+                                              Navigator.pop(dCtx);
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gasto vinculado correctamente'), backgroundColor: Colors.teal));
+                                            }
+                                          },
+                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16)),
+                                          child: const Text('Guardar'),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 20),
+                                    ],
+                                  ),
+                                );
+                              }
+                            );
+                          }
+                        );
+                      },
+                      icon: const Icon(Icons.receipt_long, color: Colors.teal),
+                      label: const Text('Generar Gasto Compartido', style: TextStyle(color: Colors.teal)),
+                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.teal)),
+                    )
+                  else
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.green.shade200)),
+                          child: Row(children: [
+                            const Icon(Icons.check_circle, color: Colors.green),
+                            const SizedBox(width: 10),
+                            const Expanded(child: Text("✅ Gasto asociado registrado en Finanzas.", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12))),
+                          ]),
+                        ),
+                        // 📸 AQUI MOSTRAMOS LA MINIATURA DEL TICKET EN EL CALENDARIO
+                        if (evento.ticketsGasto.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          const Text('📸 Tickets del gasto:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.teal)),
+                          const SizedBox(height: 5),
+                          SizedBox(
+                            height: 80,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: evento.ticketsGasto.length,
+                              itemBuilder: (ctx, i) {
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 12.0, top: 8.0),
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      GestureDetector(
+                                        onTap: () {
+                                          showDialog(context: context, builder: (ctx) => Dialog(
+                                            backgroundColor: Colors.black87,
+                                            insetPadding: EdgeInsets.zero,
+                                            child: Stack(alignment: Alignment.center, children: [
+                                              InteractiveViewer(child: kIsWeb 
+                                                ? Image.network(evento.ticketsGasto[i], errorBuilder: (c,e,s) => const Icon(Icons.broken_image, color: Colors.white)) 
+                                                : Image.file(File(evento.ticketsGasto[i]), errorBuilder: (c,e,s) => const Icon(Icons.broken_image, color: Colors.white))),
+                                              Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
+                                            ]),
+                                          ));
+                                        },
+                                        child: Container(
+                                          width: 80, height: 80,
+                                          decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300)),
+                                          child: ClipRRect(borderRadius: BorderRadius.circular(8), child: kIsWeb 
+                                            ? Image.network(evento.ticketsGasto[i], fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.image_not_supported, color: Colors.grey)) 
+                                            : Image.file(File(evento.ticketsGasto[i]), fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.image_not_supported, color: Colors.grey))),
+                                        ),
+                                      ),
+                                      if (!esObserver)
+                                        Positioned(
+                                          top: -8,
+                                          right: -8,
+                                          child: GestureDetector(
+                                            onTap: () => setModalState(() {
+                                              evento.ticketsGasto.removeAt(i);
+                                              evento.logsTrazabilidad.add('🗑️ Ticket eliminado del evento por $miNombre');
+                                            }),
+                                            child: const CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14)),
+                                          ),
+                                        )
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ]
+                      ],
+                    ),
+
                   const SizedBox(height: 10),
                   const Text('Chat del Evento', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
@@ -1360,9 +1655,9 @@ class _CalendarTabState extends State<CalendarTab> {
                             Text('${evento.fecha.hour}:${evento.fecha.minute.toString().padLeft(2,'0')} - Resp: ${evento.responsable}'),
                             // REQ 1: Mostrar niños implicados
                             if (evento.ninosAsignados.isNotEmpty) Text('Para: ${evento.ninosAsignados.join(", ")}', style: const TextStyle(color: Colors.teal, fontSize: 11, fontWeight: FontWeight.bold)),
-                            if (esPendiente) const Text('⚠️ Pendiente de aprobación (Fuera de turno)', style: TextStyle(color: Colors.deepOrange, fontSize: 11, fontWeight: FontWeight.bold)),
-                            if (esSolicitudBorrado) Text('🚨 SOLICITUD DE BORRADO: ${evento.motivoSolicitud}', style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
-                            if (esCancelado) const Text('❌ EVENTO CANCELADO', style: TextStyle(color: Colors.grey, fontSize: 11, fontStyle: FontStyle.italic)),
+                            if (esPendiente) const Text('Pendiente de aprobación (Fuera de turno)', style: TextStyle(color: Colors.deepOrange, fontSize: 11, fontWeight: FontWeight.bold)),
+                            if (esSolicitudBorrado) Text('SOLICITUD DE BORRADO: ${evento.motivoSolicitud}', style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
+                            if (esCancelado) const Text('EVENTO CANCELADO', style: TextStyle(color: Colors.grey, fontSize: 11, fontStyle: FontStyle.italic)),
                             if (!esCancelado && evento.creador == miNombre && evento.vistoPorOtro != null)
                               Text('👁 Visto por $otroNombre el ${evento.vistoPorOtro!.day}/${evento.vistoPorOtro!.month}', style: const TextStyle(color: Colors.blue, fontSize: 10)),
                             if (evento.adjuntos.isNotEmpty)
