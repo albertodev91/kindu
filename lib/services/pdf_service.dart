@@ -7,6 +7,7 @@ import 'package:printing/printing.dart';
 import '../screens/finance_tab.dart'; 
 import '../screens/calendar_tab.dart'; // Importamos Evento y EstadoEvento
 import '../screens/baul_tab.dart'; // Importamos Documento
+import '../screens/avisos_tab.dart'; // Importamos AvisoUsuario
 
 class PdfService {
   static final PdfService _instancia = PdfService._internal();
@@ -598,6 +599,89 @@ class PdfService {
       );
       if (Navigator.canPop(context)) Navigator.pop(context);
       await Printing.sharePdf(bytes: await pdf.save(), filename: 'Kindu_Boveda_${ahora.millisecondsSinceEpoch}.pdf');
+    } catch (e) {
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al generar PDF: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  /// Exporta el Informe de Comunicaciones y Avisos
+  Future<void> exportarInformeAvisos(BuildContext context, List<AvisoUsuario> avisos, List<String> auditoria) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Generando informe de comunicaciones...")]),
+      ),
+    );
+
+    try {
+      final pdf = pw.Document();
+      final fuenteNormal = await PdfGoogleFonts.robotoRegular();
+      final fuenteNegrita = await PdfGoogleFonts.robotoBold();
+
+      final ahora = DateTime.now();
+      final fechaFirma = '${ahora.day.toString().padLeft(2, '0')}/${ahora.month.toString().padLeft(2, '0')}/${ahora.year}';
+      final horaFirma = '${ahora.hour.toString().padLeft(2, '0')}:${ahora.minute.toString().padLeft(2, '0')}';
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(40),
+          theme: pw.ThemeData.withFont(base: fuenteNormal, bold: fuenteNegrita),
+          footer: (pw.Context context) {
+            return pw.Container(
+              alignment: pw.Alignment.centerRight,
+              margin: const pw.EdgeInsets.only(top: 10),
+              child: pw.Column(children: [pw.Divider(), pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Kindu - Registro de Comunicaciones', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)), pw.Text('Página ${context.pageNumber} de ${context.pagesCount}', style: pw.TextStyle(fontSize: 10, color: PdfColors.blueGrey, fontWeight: pw.FontWeight.bold))])])
+            );
+          },
+          build: (pw.Context context) {
+            return [
+              pw.Header(level: 0, child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('INFORME LEGAL: REGISTRO DE COMUNICACIONES', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.teal)), pw.Text('Kindu App', style: pw.TextStyle(fontSize: 16, color: PdfColors.grey700))])),
+              pw.SizedBox(height: 5),
+              pw.Text('AVISOS Y NOTIFICACIONES PARENTALES', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+              pw.Text('Fecha de emisión: $fechaFirma a las $horaFirma', style: const pw.TextStyle(fontSize: 10)),
+              pw.SizedBox(height: 20),
+
+              // SECCIÓN 1: TABLA DE AVISOS
+              pw.Text('HISTORIAL DE COMUNICACIONES', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 10),
+              if (avisos.isEmpty)
+                pw.Container(padding: const pw.EdgeInsets.all(20), alignment: pw.Alignment.center, child: pw.Text('No hay avisos registrados.', style: const pw.TextStyle(color: PdfColors.grey)))
+              else
+                pw.TableHelper.fromTextArray(
+                  headers: ['Fecha', 'Tipo', 'Título / Detalle', 'Estado', 'Evidencias'],
+                  data: avisos.map((a) {
+                    final fecha = '${a.fechaCreacion.day}/${a.fechaCreacion.month}/${a.fechaCreacion.year} ${a.fechaCreacion.hour}:${a.fechaCreacion.minute.toString().padLeft(2,'0')}';
+                    final estado = a.enterado ? 'CONFIRMADO' : 'PENDIENTE';
+                    return [fecha, a.tipo, '${a.titulo}\n${a.descripcion}', estado, '${a.rutasArchivos.length} adjuntos'];
+                  }).toList(),
+                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 10),
+                  headerDecoration: const pw.BoxDecoration(color: PdfColors.teal),
+                  cellStyle: const pw.TextStyle(fontSize: 8),
+                  rowDecoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300))),
+                  cellAlignment: pw.Alignment.centerLeft,
+                ),
+
+              // SECCIÓN 2: LIBRO DE ACTAS
+              pw.SizedBox(height: 30),
+              pw.Container(
+                width: double.infinity, padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400), color: PdfColors.grey100),
+                child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                    pw.Text('LIBRO DE ACTAS FORENSE (TRAZABILIDAD)', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
+                    pw.Divider(color: PdfColors.grey400),
+                    if (auditoria.isEmpty) pw.Text("No se han registrado movimientos forenses ni alteraciones.", style: pw.TextStyle(color: PdfColors.grey700, fontStyle: pw.FontStyle.italic, fontSize: 10))
+                    else ...auditoria.map((log) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 4), child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [pw.Text('• ', style: pw.TextStyle(color: PdfColors.black, fontWeight: pw.FontWeight.bold, fontSize: 9)), pw.Expanded(child: pw.Text(log, style: const pw.TextStyle(fontSize: 9)))]))).toList()
+                ])
+              ),
+            ];
+          }
+        )
+      );
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      await Printing.sharePdf(bytes: await pdf.save(), filename: 'Kindu_Avisos_${ahora.millisecondsSinceEpoch}.pdf');
     } catch (e) {
       if (Navigator.canPop(context)) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al generar PDF: $e'), backgroundColor: Colors.red));
