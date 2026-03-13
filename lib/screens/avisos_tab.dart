@@ -40,26 +40,18 @@ class _AvisosTabState extends State<AvisosTab> {
   // Simulación de Rol (Igual que en otras tabs)
   String _rolUsuario = 'admin';
 
-  @override
-  void initState() {
-    super.initState();
-    // Inyectar aviso de prueba
-    avisos.add(AvisoUsuario(
-      id: 'AVISO-001',
-      titulo: 'Aviso Escolar',
-      descripcion: 'Reunión de tutoría trimestral.',
-      tipo: 'Escolar',
-      fechaCreacion: DateTime.now(),
-      enterado: false,
-      rutasArchivos: [], // Sin adjuntos
-    ));
-  }
+ 
 
-  void _abrirFormularioAviso(BuildContext context) {
-    String titulo = '';
-    String descripcion = '';
-    String tipoSeleccionado = 'Escolar'; // Por defecto
-    List<String> adjuntosTemporales = []; // Para las fotos nuevas
+  void _abrirFormularioAviso(BuildContext context, {AvisoUsuario? avisoEditar}) {
+    bool esEdicion = avisoEditar != null;
+    String titulo = esEdicion ? avisoEditar.titulo : '';
+    String descripcion = esEdicion ? avisoEditar.descripcion : '';
+    String tipoSeleccionado = esEdicion ? avisoEditar.tipo : 'Escolar'; // Por defecto
+    List<String> adjuntosTemporales = esEdicion ? List.from(avisoEditar.rutasArchivos) : []; // Para las fotos nuevas
+
+    // Controladores para precargar texto si es edición
+    final TextEditingController tituloCtrl = TextEditingController(text: titulo);
+    final TextEditingController descCtrl = TextEditingController(text: descripcion);
 
     showModalBottomSheet(
       context: context,
@@ -77,7 +69,7 @@ class _AvisosTabState extends State<AvisosTab> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Crear Nuevo Aviso', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
+                  Text(esEdicion ? 'Editar Aviso' : 'Crear Nuevo Aviso', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
                   const SizedBox(height: 20),
                   
                   // SELECCIONAR CATEGORÍA
@@ -94,13 +86,13 @@ class _AvisosTabState extends State<AvisosTab> {
                   const SizedBox(height: 15),
 
                   TextField(
-                    onChanged: (val) => titulo = val,
+                    controller: tituloCtrl,
                     decoration: InputDecoration(labelText: 'Título del aviso', prefixIcon: const Icon(Icons.title), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                   ),
                   const SizedBox(height: 15),
                   
                   TextField(
-                    onChanged: (val) => descripcion = val,
+                    controller: descCtrl,
                     maxLines: 3,
                     decoration: InputDecoration(labelText: 'Detalles...', prefixIcon: const Icon(Icons.description), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                   ),
@@ -127,25 +119,49 @@ class _AvisosTabState extends State<AvisosTab> {
                     width: double.infinity, height: 50,
                     child: ElevatedButton.icon(
                       onPressed: () {
-                        if (titulo.isNotEmpty) {
+                        if (tituloCtrl.text.isNotEmpty) {
                           // AÑADE EL AVISO A LA LISTA REAL Y ACTUALIZA LA PANTALLA
                           setState(() {
-                            avisos.insert(0, AvisoUsuario(
-                              id: 'AVISO-${DateTime.now().millisecondsSinceEpoch}',
-                              titulo: titulo,
-                              descripcion: descripcion,
-                              tipo: tipoSeleccionado,
-                              fechaCreacion: DateTime.now(),
-                              enterado: false,
-                              rutasArchivos: adjuntosTemporales
-                            ));
-                            // Log Forense
-                            registroAuditoriaGlobal.add("📝 Aviso: El usuario creó un aviso $tipoSeleccionado titulado '$titulo' con ${adjuntosTemporales.length} evidencias.");
+                            if (esEdicion) {
+                              // EDITAR EXISTENTE
+                              // Buscamos el índice del aviso original
+                              int index = avisos.indexOf(avisoEditar!);
+                              if (index != -1) {
+                                avisos[index] = AvisoUsuario(
+                                  id: avisoEditar.id, // Mismo ID
+                                  titulo: tituloCtrl.text,
+                                  descripcion: descCtrl.text,
+                                  tipo: tipoSeleccionado,
+                                  fechaCreacion: avisoEditar.fechaCreacion, // Misma fecha creación
+                                  enterado: avisoEditar.enterado, // Mismo estado
+                                  rutasArchivos: adjuntosTemporales,
+                                );
+                                // Log Forense de Edición
+                                registroAuditoriaGlobal.add("✏️ Aviso: El usuario editó el aviso '${tituloCtrl.text}' (Evidencias: ${adjuntosTemporales.length}).");
+                              }
+                            } else {
+                              // CREAR NUEVO
+                              avisos.insert(0, AvisoUsuario(
+                                id: 'AVISO-${DateTime.now().millisecondsSinceEpoch}',
+                                titulo: tituloCtrl.text,
+                                descripcion: descCtrl.text,
+                                tipo: tipoSeleccionado,
+                                fechaCreacion: DateTime.now(),
+                                enterado: false,
+                                rutasArchivos: adjuntosTemporales
+                              ));
+                              // Log Forense de Creación
+                              registroAuditoriaGlobal.add("📝 Aviso: El usuario creó un aviso $tipoSeleccionado titulado '${tituloCtrl.text}' con ${adjuntosTemporales.length} evidencias.");
+                            }
                           });
                           Navigator.pop(context);
+                          if (esEdicion) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Aviso actualizado correctamente'), backgroundColor: Colors.teal));
+                          }
                         }
                       },
-                      icon: const Icon(Icons.save), label: const Text('Guardar Aviso', style: TextStyle(fontSize: 16)),
+                      icon: const Icon(Icons.save), 
+                      label: Text(esEdicion ? 'Guardar Cambios' : 'Guardar Aviso', style: const TextStyle(fontSize: 16)),
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
                     ),
                   ),
@@ -172,68 +188,109 @@ class _AvisosTabState extends State<AvisosTab> {
         initialChildSize: 0.6,
         minChildSize: 0.4,
         maxChildSize: 0.9,
-        builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              const Text("Evidencias Adjuntas", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal)),
-              const SizedBox(height: 10),
-              Expanded(
-                child: GridView.builder(
-                  controller: scrollController,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10),
-                  itemCount: aviso.rutasArchivos.length,
-                  itemBuilder: (context, index) {
-                    final path = aviso.rutasArchivos[index];
-                    return Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        GestureDetector(
-                          onTap: () {
-                            showDialog(
-                              context: context,
-                              builder: (ctx) => Dialog(
-                                backgroundColor: Colors.black87,
-                                insetPadding: EdgeInsets.zero,
-                                child: Stack(
-                                  alignment: Alignment.center,
-                                  children: [
-                                    InteractiveViewer(child: kIsWeb ? Image.network(path) : Image.file(File(path))),
-                                    Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
-                                  ],
-                                ),
-                              ),
-                            );
+        builder: (_, scrollController) {
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              return Container(
+                decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Text("Evidencias Adjuntas", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal)),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: aviso.rutasArchivos.isEmpty 
+                        ? const Center(child: Text("No hay evidencias adjuntas", style: TextStyle(color: Colors.grey)))
+                        : GridView.builder(
+                            controller: scrollController,
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10),
+                            itemCount: aviso.rutasArchivos.length,
+                            itemBuilder: (context, index) {
+                              final path = aviso.rutasArchivos[index];
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  GestureDetector(
+                                    onTap: () {
+                                      showDialog(
+                                        context: context,
+                                        builder: (ctx) => Dialog(
+                                          backgroundColor: Colors.black87,
+                                          insetPadding: EdgeInsets.zero,
+                                          child: Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              InteractiveViewer(child: kIsWeb ? Image.network(path) : Image.file(File(path))),
+                                              Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(ctx))),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: kIsWeb ? Image.network(path, fit: BoxFit.cover) : Image.file(File(path), fit: BoxFit.cover),
+                                    ),
+                                  ),
+                                  // Botón Borrar (Solo si no está confirmado)
+                                  if (!aviso.enterado)
+                                    Positioned(
+                                      top: 5, right: 5,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setModalState(() {
+                                            aviso.rutasArchivos.removeAt(index);
+                                          });
+                                          setState(() {}); // Actualiza la vista padre
+                                          registroAuditoriaGlobal.add("🗑️ Aviso: El usuario eliminó una evidencia del aviso '${aviso.titulo}'.");
+                                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidencia eliminada'), backgroundColor: Colors.red));
+                                        },
+                                        child: const CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14)),
+                                      ),
+                                    )
+                                ],
+                              );
+                            },
+                          ),
+                    ),
+                    const SizedBox(height: 20),
+                    if (!aviso.enterado) // Bloqueo legal forense
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            try {
+                              final List<XFile> nuevasFotos = await ImagePicker().pickMultiImage();
+                              if (nuevasFotos.isNotEmpty) {
+                                if (kIsWeb) await Future.delayed(const Duration(milliseconds: 300));
+                                
+                                setModalState(() {
+                                  aviso.rutasArchivos.addAll(nuevasFotos.map((f) => f.path));
+                                });
+                                // Actualizar la pantalla principal por si cambia el contador
+                                setState(() {}); 
+                                
+                                // Log forense
+                                registroAuditoriaGlobal.add("📎 Aviso: El usuario añadió ${nuevasFotos.length} evidencia(s) al aviso '${aviso.titulo}'.");
+                              }
+                            } catch (e) {
+                              debugPrint('Error picker: $e');
+                            }
                           },
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: kIsWeb ? Image.network(path, fit: BoxFit.cover) : Image.file(File(path), fit: BoxFit.cover),
+                          icon: const Icon(Icons.add_a_photo, color: Colors.teal),
+                          label: Text(aviso.rutasArchivos.isEmpty ? 'Adjuntar Evidencias' : 'Añadir más evidencias', style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.teal), 
+                            padding: const EdgeInsets.symmetric(vertical: 15)
                           ),
                         ),
-                        // Botón Borrar
-                        Positioned(
-                          top: 5, right: 5,
-                          child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                aviso.rutasArchivos.removeAt(index);
-                                registroAuditoriaGlobal.add("🗑️ Aviso: El usuario eliminó una evidencia del aviso '${aviso.titulo}'.");
-                              });
-                              Navigator.pop(ctx); 
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidencia eliminada'), backgroundColor: Colors.red));
-                            },
-                            child: const CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14)),
-                          ),
-                        )
-                      ],
-                    );
-                  },
+                      ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-        ),
+              );
+            },
+          );
+        }
       ),
     );
   }
@@ -335,16 +392,29 @@ class _AvisosTabState extends State<AvisosTab> {
                           )
                       ],
                     ),
-                    trailing: IconButton(
-                      icon: Icon(Icons.done_all, color: aviso.enterado ? Colors.green : Colors.grey),
-                      tooltip: aviso.enterado ? 'Confirmado y Leído' : 'Marcar como Enterado',
-                      onPressed: aviso.enterado ? null : () {
-                        setState(() {
-                          aviso.enterado = true;
-                          registroAuditoriaGlobal.add("🔔 Aviso: El usuario confirmó lectura del aviso '${aviso.titulo}'.");
-                        });
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Confirmación de lectura registrada.'), backgroundColor: Colors.green));
-                      },
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Botón de Editar (Solo si no está confirmado)
+                        if (!aviso.enterado)
+                          IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.blue),
+                            tooltip: 'Editar Aviso',
+                            onPressed: () => _abrirFormularioAviso(context, avisoEditar: aviso),
+                          ),
+                        // Botón de Confirmación de Lectura
+                        IconButton(
+                          icon: Icon(Icons.done_all, color: aviso.enterado ? Colors.green : Colors.grey),
+                          tooltip: aviso.enterado ? 'Confirmado y Leído' : 'Marcar como Enterado',
+                          onPressed: aviso.enterado ? null : () {
+                            setState(() {
+                              aviso.enterado = true;
+                              registroAuditoriaGlobal.add("🔔 Aviso: El usuario confirmó lectura del aviso '${aviso.titulo}'.");
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Confirmación de lectura registrada.'), backgroundColor: Colors.green));
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -354,7 +424,7 @@ class _AvisosTabState extends State<AvisosTab> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _abrirFormularioAviso(context),
+        onPressed: () => _abrirFormularioAviso(context), // Crear nuevo
         backgroundColor: Colors.teal,
         child: const Icon(Icons.add, color: Colors.white),
       ),
