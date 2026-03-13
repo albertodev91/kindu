@@ -15,6 +15,7 @@ class MensajeDisputa {
 
 // --- ESTRUCTURA DEL GASTO NIVEL DIOS ---
 class Gasto {
+  final String id; // 🆔 NUEVO: Identificador único para enlaces fuertes
   final String titulo;
   final double total;
   final double miParte;
@@ -52,6 +53,7 @@ class Gasto {
   final List<String> historialModificaciones;
 
   Gasto({
+    String? id, // Opcional al crear, se genera auto si es null
     required this.titulo,
     required this.total,
     required this.miParte,
@@ -77,7 +79,8 @@ class Gasto {
     this.comprobantePago,
     this.creadorDisputa, // Inicializado
     this.historialModificaciones = const [],
-  }) : hiloDisputa = hiloDisputa ?? []; 
+  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(), // 🆔 Generación automática
+       hiloDisputa = hiloDisputa ?? []; 
 
   bool get estaPagado => cantidadPagada >= miParte;
 }

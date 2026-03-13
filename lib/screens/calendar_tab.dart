@@ -889,6 +889,33 @@ class _CalendarTabState extends State<CalendarTab> {
       setState(() { evento.vistoPorOtro = DateTime.now(); });
     }
 
+    // 🔄 ANTI-ZOMBI: Validación en Tiempo Real al abrir el detalle
+    if (evento.idGastoAsociado != null) {
+      int index = baseDatosGastosGlobal.indexWhere((g) => g.titulo == evento.idGastoAsociado);
+      if (index == -1) {
+        // Ya no existe en finanzas. Limpieza total.
+        setState(() {
+          evento.idGastoAsociado = null;
+          evento.ticketsGasto.clear();
+          evento.logsTrazabilidad.add('🗑️ ALERTA: Sistema detectó la eliminación del gasto en Finanzas el ${DateTime.now().toString().substring(0,16)}');
+        });
+      } else {
+        // Sincronización de tickets en espejo con DETECCIÓN DE BORRADO
+        int numTicketsAnterior = evento.ticketsGasto.length;
+        int numTicketsNuevo = baseDatosGastosGlobal[index].rutasAdjuntos.length;
+        
+        setState(() {
+          evento.ticketsGasto = List.from(baseDatosGastosGlobal[index].rutasAdjuntos);
+          
+          // Si detectamos que hay menos tickets que antes, alguien borró un ticket en Finanzas
+          if (numTicketsNuevo < numTicketsAnterior) {
+            evento.logsTrazabilidad.add('🗑️ ALERTA: Ticket económico eliminado desde Finanzas el ${DateTime.now().toString().substring(0,16)}');
+            _registroAuditoria.add("🗑️ Evento '${evento.titulo}': Evidencia económica (ticket) eliminada desde Finanzas.");
+          }
+        });
+      }
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1230,7 +1257,11 @@ class _CalendarTabState extends State<CalendarTab> {
 
                                               double total = double.tryParse(importeCtrl.text.replaceAll(',', '.')) ?? 0.0;
                                               
+                                              // 🆔 GENERAMOS EL ID AQUÍ PARA ENLAZARLO
+                                              String nuevoIdGasto = 'G-${DateTime.now().millisecondsSinceEpoch}';
+                                              
                                               final nuevoGasto = Gasto(
+                                                id: nuevoIdGasto,
                                                 titulo: conceptoCtrl.text,
                                                 total: total,
                                                 miParte: total / 2, 
@@ -1250,7 +1281,7 @@ class _CalendarTabState extends State<CalendarTab> {
                                               baseDatosGastosGlobal.insert(0, nuevoGasto);
 
                                               setModalState(() {
-                                                evento.idGastoAsociado = 'GASTO-PENDIENTE';
+                                                evento.idGastoAsociado = conceptoCtrl.text;
                                                 evento.logsTrazabilidad.add("💸 Gasto de ${importeCtrl.text}€ generado con ${ticketsGasto.length} tickets adjuntos el ${DateTime.now().toString().substring(0,16)}");
                                                 evento.ticketsGasto = List.from(ticketsGasto);
                                               });
@@ -1285,11 +1316,26 @@ class _CalendarTabState extends State<CalendarTab> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.green.shade200)),
-                          child: Row(children: [
-                            const Icon(Icons.check_circle, color: Colors.green),
-                            const SizedBox(width: 10),
-                            const Expanded(child: Text("✅ Gasto asociado registrado en Finanzas.", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12))),
-                          ]),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.check_circle, color: Colors.green),
+                              const SizedBox(width: 10),
+                              const Expanded(child: Text("Gasto asociado registrado en Finanzas.", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12))),
+                              if (!esObserver)
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                  onPressed: () {
+                                    setModalState(() {
+                                      baseDatosGastosGlobal.removeWhere((g) => g.titulo == evento.idGastoAsociado);
+                                      evento.idGastoAsociado = null;
+                                      evento.ticketsGasto.clear();
+                                      evento.logsTrazabilidad.add('🗑️ Gasto eliminado desde el calendario el ${DateTime.now().toString().substring(0,16)}');
+                                    });
+                                    setState(() => _registroAuditoria.add("🗑️ Evento '${evento.titulo}': Gasto eliminado."));
+                                  },
+                                )
+                            ],
+                          ),
                         ),
                         // 📸 AQUI MOSTRAMOS LA MINIATURA DEL TICKET EN EL CALENDARIO
                         if (evento.ticketsGasto.isNotEmpty) ...[
@@ -1333,11 +1379,22 @@ class _CalendarTabState extends State<CalendarTab> {
                                           top: -8,
                                           right: -8,
                                           child: GestureDetector(
-                                            onTap: () => setModalState(() {
-                                              evento.ticketsGasto.removeAt(i);
-                                              evento.logsTrazabilidad.add('🗑️ Ticket eliminado del evento por $miNombre');
-                                            }),
-                                            child: const CircleAvatar(radius: 12, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 14)),
+                                            onTap: () {
+                                              setModalState(() {
+                                                String ticketBorrado = evento.ticketsGasto.removeAt(i);
+                                                int gIndex = baseDatosGastosGlobal.indexWhere((g) => g.titulo == evento.idGastoAsociado);
+                                                if (gIndex != -1) baseDatosGastosGlobal[gIndex].rutasAdjuntos.remove(ticketBorrado);
+                                                
+                                                // Rastro en la Agenda (Detalle del evento)
+                                                evento.logsTrazabilidad.add('🗑️ Ticket eliminado el ${DateTime.now().toString().substring(0,16)}');
+                                              });
+                                              
+                                              // 🚀 FIX FORENSE: Rastro en el Calendario Visual (Global)
+                                              setState(() {
+                                                _registroAuditoria.add("🗑️ Evento '${evento.titulo}': Evidencia económica (ticket) eliminada.");
+                                              });
+                                            },
+                                            child: const CircleAvatar(radius: 12, backgroundColor: Colors.white, child: CircleAvatar(radius: 10, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 10))),
                                           ),
                                         )
                                     ],
@@ -1502,8 +1559,28 @@ class _CalendarTabState extends State<CalendarTab> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rol cambiado a: ${_rolUsuario.toUpperCase()}'), backgroundColor: Colors.indigo));
   }
 
+  void _sincronizarConFinanzas() {
+    // Barrido silencioso de todos los eventos para detectar si su gasto fue borrado
+    for (var listaEventos in _eventos.values) {
+      for (var evento in listaEventos) {
+        if (evento.idGastoAsociado != null) {
+          // Verificamos si el gasto sigue existiendo en Finanzas (Por Título, para coincidir con el enlace)
+          bool existeEnFinanzas = baseDatosGastosGlobal.any((g) => g.titulo == evento.idGastoAsociado);
+          
+          if (!existeEnFinanzas) {
+            // Si no existe, desenlazamos y limpiamos
+            evento.idGastoAsociado = null;
+            evento.ticketsGasto.clear();
+            evento.logsTrazabilidad.add('🗑️ ALERTA: Gasto desvinculado/eliminado desde Finanzas el ${DateTime.now().toString().substring(0,16)}');
+          }
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    _sincronizarConFinanzas();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Calendario', style: TextStyle(fontSize: 18, color: Colors.teal)),
