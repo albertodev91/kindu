@@ -61,6 +61,9 @@ class Evento {
 // --- BASE DE DATOS EVENTOS (GLOBAL) ---
 Map<DateTime, List<Evento>>? baseDatosEventosGlobal;
 
+// LIBRO DE ACTAS ÚNICO (GLOBAL)
+List<String> registroAuditoriaGlobal = [];
+
 class CalendarTab extends StatefulWidget {
   const CalendarTab({super.key});
 
@@ -94,9 +97,6 @@ class _CalendarTabState extends State<CalendarTab> {
 
   // NUEVO: Mapa para guardar los cambios manuales (Día -> Persona)
   final Map<DateTime, String> _custodiaManual = {};
-
-  // REQ 3: Registro de Alteraciones (Auditoría)
-  final List<String> _registroAuditoria = [];
 
   @override
   void initState() {
@@ -436,7 +436,7 @@ class _CalendarTabState extends State<CalendarTab> {
         cambiosPropuestos.forEach((fecha, nuevoCustodio) {
            // Auditoría
            String fechaAfectada = "${fecha.day}/${fecha.month}/${fecha.year}";
-           _registroAuditoria.add("El $hoyStr se acordó modificar la custodia del día $fechaAfectada a favor de $nuevoCustodio");
+           registroAuditoriaGlobal.add("El $hoyStr se acordó modificar la custodia del día $fechaAfectada a favor de $nuevoCustodio");
            
            // Barrido Zombi (Efecto Mariposa)
            if (nuevoCustodio != miNombre) {
@@ -910,7 +910,7 @@ class _CalendarTabState extends State<CalendarTab> {
           // Si detectamos que hay menos tickets que antes, alguien borró un ticket en Finanzas
           if (numTicketsNuevo < numTicketsAnterior) {
             evento.logsTrazabilidad.add('🗑️ ALERTA: Ticket económico eliminado desde Finanzas el ${DateTime.now().toString().substring(0,16)}');
-            _registroAuditoria.add("🗑️ Evento '${evento.titulo}': Evidencia económica (ticket) eliminada desde Finanzas.");
+            registroAuditoriaGlobal.add("🗑️ Evento '${evento.titulo}': Evidencia económica (ticket) eliminada desde Finanzas.");
           }
         });
       }
@@ -1286,7 +1286,7 @@ class _CalendarTabState extends State<CalendarTab> {
                                                 evento.ticketsGasto = List.from(ticketsGasto);
                                               });
                                               setState(() {
-                                                _registroAuditoria.add("💸 Evento '${evento.titulo}': Gasto de ${importeCtrl.text}€ generado con evidencia.");
+                                                registroAuditoriaGlobal.add("💸 Evento '${evento.titulo}': Gasto de ${importeCtrl.text}€ generado con evidencia.");
                                               });
                                               Navigator.pop(dCtx);
                                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gasto vinculado correctamente'), backgroundColor: Colors.teal));
@@ -1331,7 +1331,7 @@ class _CalendarTabState extends State<CalendarTab> {
                                       evento.ticketsGasto.clear();
                                       evento.logsTrazabilidad.add('🗑️ Gasto eliminado desde el calendario el ${DateTime.now().toString().substring(0,16)}');
                                     });
-                                    setState(() => _registroAuditoria.add("🗑️ Evento '${evento.titulo}': Gasto eliminado."));
+                                    setState(() => registroAuditoriaGlobal.add("🗑️ Evento '${evento.titulo}': Gasto eliminado."));
                                   },
                                 )
                             ],
@@ -1391,7 +1391,7 @@ class _CalendarTabState extends State<CalendarTab> {
                                               
                                               // 🚀 FIX FORENSE: Rastro en el Calendario Visual (Global)
                                               setState(() {
-                                                _registroAuditoria.add("🗑️ Evento '${evento.titulo}': Evidencia económica (ticket) eliminada.");
+                                                registroAuditoriaGlobal.add("🗑️ Evento '${evento.titulo}': Evidencia económica (ticket) eliminada.");
                                               });
                                             },
                                             child: const CircleAvatar(radius: 12, backgroundColor: Colors.white, child: CircleAvatar(radius: 10, backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white, size: 10))),
@@ -1534,7 +1534,7 @@ class _CalendarTabState extends State<CalendarTab> {
                   List<Evento> todosLosEventos = _eventos.values.expand((e) => e).toList();
                   
                   // LLAMAMOS A LA TABLA LEGAL (y le pasamos la auditoría)
-                  PdfService().exportarInformeAgenda(context, todosLosEventos, null, _registroAuditoria);
+                  PdfService().exportarInformeAgenda(context, todosLosEventos, null, registroAuditoriaGlobal);
                 },
               ),
             ],
@@ -1548,7 +1548,7 @@ class _CalendarTabState extends State<CalendarTab> {
     // Convertimos el mapa de eventos a lista plana
     List<Evento> todosLosEventos = _eventos.values.expand((e) => e).toList();
     // Llamamos al nuevo servicio visual
-    PdfService().exportarCalendarioVisual(context, todosLosEventos, rango, _getCustodio, _registroAuditoria);
+    PdfService().exportarCalendarioVisual(context, todosLosEventos, rango, _getCustodio, registroAuditoriaGlobal);
   }
 
   // Helper para cambiar rol (Demo)

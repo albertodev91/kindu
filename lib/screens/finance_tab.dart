@@ -132,6 +132,16 @@ class _FinanceTabState extends State<FinanceTab> {
 
   List<Gasto> listaGastos = [];
 
+  // JUGADA 4: RBAC (Role-Based Access Control) - Igual que en Calendario
+  String _rolUsuario = 'admin'; // Valores: 'admin' (Padre/Madre), 'observer' (Abuelo/Mediador)
+
+  void _cambiarRol() {
+    setState(() {
+      _rolUsuario = _rolUsuario == 'admin' ? 'observer' : 'admin';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rol cambiado a: ${_rolUsuario.toUpperCase()}'), backgroundColor: Colors.indigo));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -536,6 +546,8 @@ class _FinanceTabState extends State<FinanceTab> {
     bool esAcreedorReal = gasto.esDevolucion ? gasto.soyDeudor : !gasto.soyDeudor;
     TextEditingController chatCtrl = TextEditingController();
 
+    bool esObserver = _rolUsuario == 'observer';
+
     showModalBottomSheet(
       context: context, isScrollControlled: true, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => StatefulBuilder( 
@@ -553,9 +565,9 @@ class _FinanceTabState extends State<FinanceTab> {
                     Row(
                       children: [
                         // EDITAR: Siempre visible (pero dentro se bloquea si es necesario)
-                        if (gasto.creador == miNombreReal) IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: !gasto.esCobroIntegro, gastoAEditar: gasto, indexAEditar: indexReal); }),
+                        if (gasto.creador == miNombreReal && !esObserver) IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(context); _abrirFormulario(context, esGastoCompartido: !gasto.esCobroIntegro, gastoAEditar: gasto, indexAEditar: indexReal); }),
                         // BORRAR: Solo visible si es seguro (Tu lógica original estaba perfecta aquí)
-                        if (!gasto.estaPagado && !gasto.enDisputa && gasto.creador == miNombreReal && gasto.cantidadPagada == 0 && gasto.pagoPendienteValidacion == 0) IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => _borrarGasto(indexReal)),
+                        if (!gasto.estaPagado && !gasto.enDisputa && gasto.creador == miNombreReal && gasto.cantidadPagada == 0 && gasto.pagoPendienteValidacion == 0 && !esObserver) IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => _borrarGasto(indexReal)),
                       ],
                     )
                   ],
@@ -600,16 +612,17 @@ class _FinanceTabState extends State<FinanceTab> {
                           ]),
                         )),
                         const Divider(color: Colors.red),
-                        Row(children: [
-                          Expanded(child: TextField(controller: chatCtrl, decoration: InputDecoration(hintText: 'Escribir respuesta...', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none)))),
-                          IconButton(icon: const Icon(Icons.send, color: Colors.red), onPressed: () {
-                            if (chatCtrl.text.isNotEmpty) {
-                              _enviarMensajeDisputa(indexReal, chatCtrl.text);
-                              chatCtrl.clear();
-                              setModalState((){}); 
-                            }
-                          })
-                        ])
+                        if (!esObserver)
+                          Row(children: [
+                            Expanded(child: TextField(controller: chatCtrl, decoration: InputDecoration(hintText: 'Escribir respuesta...', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none)))),
+                            IconButton(icon: const Icon(Icons.send, color: Colors.red), onPressed: () {
+                              if (chatCtrl.text.isNotEmpty) {
+                                _enviarMensajeDisputa(indexReal, chatCtrl.text);
+                                chatCtrl.clear();
+                                setModalState((){}); 
+                              }
+                            })
+                          ])
                       ]
                     )
                   ),
@@ -628,7 +641,7 @@ class _FinanceTabState extends State<FinanceTab> {
                           Expanded(child: Text('Pago de ${gasto.pagoPendienteValidacion.toStringAsFixed(2)}€ pendiente de validar', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange)))
                         ]),
                         const SizedBox(height: 10),
-                        if (esAcreedorReal) // Si soy el que cobra, me salen los botones
+                        if (esAcreedorReal && !esObserver) // Si soy el que cobra, me salen los botones
                           Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
@@ -745,6 +758,8 @@ class _FinanceTabState extends State<FinanceTab> {
 
                 if (gasto.estaPagado) ...[
                   Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.green.shade200)), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.verified, color: Colors.green), const SizedBox(width: 10), Text('LIQUIDADO AL 100% POR ${gasto.metodoPago.toUpperCase()}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12))]))
+                ] else if (esObserver) ...[
+                  Container(padding: const EdgeInsets.all(12), width: double.infinity, alignment: Alignment.center, decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(10)), child: const Text('Modo Observador: Acciones restringidas', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)))
                 ] else ...[
                   if (!esAcreedorReal) ...[
                     SizedBox(width: double.infinity, height: 45, child: ElevatedButton.icon(onPressed: () => _mostrarDialogoPago(indexReal, false), icon: const Icon(Icons.payment), label: const Text('Registrar Pago'), style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white))),
@@ -1113,29 +1128,14 @@ class _FinanceTabState extends State<FinanceTab> {
     }).toList();
 
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Finanzas', style: TextStyle(fontSize: 18, color: Colors.teal)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+      ),
       body: Column(
         children: [
-          Container(
-            width: double.infinity, margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: saldoAFavor ? Colors.green.shade50 : Colors.red.shade50, borderRadius: BorderRadius.circular(15), border: Border.all(color: saldoAFavor ? Colors.green.shade200 : Colors.red.shade200)),
-            child: Column(
-              children: [
-                Text(saldoAFavor ? 'Balance Total a tu favor' : 'Balance Total en contra', style: TextStyle(color: saldoAFavor ? Colors.green : Colors.red)),
-                const SizedBox(height: 8),
-                Text('${saldoAFavor ? '+' : ''} ${balanceFinal.toStringAsFixed(2)} €', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: saldoAFavor ? Colors.green : Colors.red)),
-              ],
-            ),
-          ),
-          
-          if (balanceFinal != 0)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: OutlinedButton.icon(
-                onPressed: _abrirLiquidacionAvanzada, icon: const Icon(Icons.checklist_rtl, size: 18), label: const Text('Liquidar Deuda Acumulada (Seleccionar)'),
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.teal.shade800, side: BorderSide(color: Colors.teal.shade200)),
-              ),
-            ),
-
+          // 1. BUSCADOR, ESTADÍSTICAS Y FILTRO CATEGORÍA (AHORA ARRIBA)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 5),
             child: Row(
@@ -1162,29 +1162,66 @@ class _FinanceTabState extends State<FinanceTab> {
             ),
           ),
 
+          // 2. FILTROS DE PERSONA Y BOTÓN DE EXPORTAR (JUNTOS)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: ['Todos', miNombreReal, nombreOtroProgenitor].map((filtro) {
-                bool seleccionado = _filtroActual == filtro;
-                return ChoiceChip(label: Text(filtro, style: TextStyle(color: seleccionado ? Colors.teal.shade900 : Colors.grey.shade700)), selected: seleccionado, selectedColor: Colors.teal.shade100, backgroundColor: Colors.grey.shade200, onSelected: (val) { setState(() { _filtroActual = filtro; }); });
-              }).toList(),
-            ),
-          ),
-          
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Historial', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black54)),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: ['Todos', miNombreReal, nombreOtroProgenitor].map((filtro) {
+                      bool seleccionado = _filtroActual == filtro;
+                      return ChoiceChip(label: Text(filtro, style: TextStyle(color: seleccionado ? Colors.teal.shade900 : Colors.grey.shade700)), selected: seleccionado, selectedColor: Colors.teal.shade100, backgroundColor: Colors.grey.shade200, onSelected: (val) { setState(() { _filtroActual = filtro; }); });
+                    }).toList(),
+                  ),
+                ),
+                // BOTÓN CAMBIAR ROL (ADMIN/OBSERVER) AÑADIDO AQUÍ
+                IconButton(
+                  icon: Icon(_rolUsuario == 'admin' ? Icons.security : Icons.remove_red_eye, size: 20, color: _rolUsuario == 'admin' ? Colors.blue : Colors.grey),
+                  onPressed: _cambiarRol,
+                  tooltip: 'Cambiar Rol (Admin/Observer)',
+                  padding: EdgeInsets.zero,
+                ),
+                // BOTÓN EXPORTAR INTEGRADO AQUÍ
                 TextButton.icon(
                   onPressed: _abrirMenuExportacion, 
                   icon: const Icon(Icons.download, size: 18, color: Colors.teal), 
                   label: const Text('Exportar', style: TextStyle(color: Colors.teal, fontSize: 12)),
-                )
+                  style: TextButton.styleFrom(padding: const EdgeInsets.only(left: 8)),
+                ),
               ],
+            ),
+          ),
+          
+          // 3. TARJETA DE BALANCE (AHORA DEBAJO DE LOS CONTROLES)
+          Container(
+            width: double.infinity, margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(color: saldoAFavor ? Colors.green.shade50 : Colors.red.shade50, borderRadius: BorderRadius.circular(15), border: Border.all(color: saldoAFavor ? Colors.green.shade200 : Colors.red.shade200)),
+            child: Column(
+              children: [
+                Text(saldoAFavor ? 'Balance Total a tu favor' : 'Balance Total en contra', style: TextStyle(color: saldoAFavor ? Colors.green : Colors.red)),
+                const SizedBox(height: 8),
+                Text('${saldoAFavor ? '+' : ''} ${balanceFinal.toStringAsFixed(2)} €', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: saldoAFavor ? Colors.green : Colors.red)),
+              ],
+            ),
+          ),
+          
+          // 4. BOTÓN LIQUIDAR DEUDA (SI APLICA)
+          if (balanceFinal != 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: OutlinedButton.icon(
+                onPressed: _abrirLiquidacionAvanzada, icon: const Icon(Icons.checklist_rtl, size: 18), label: const Text('Liquidar Deuda Acumulada (Seleccionar)'),
+                style: OutlinedButton.styleFrom(foregroundColor: Colors.teal.shade800, side: BorderSide(color: Colors.teal.shade200)),
+              ),
+            ),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+            child: const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Historial', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black54)),
             ),
           ),
 
@@ -1239,7 +1276,7 @@ class _FinanceTabState extends State<FinanceTab> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(onPressed: () => _mostrarMenuOpciones(context), backgroundColor: Colors.teal, child: const Icon(Icons.add, color: Colors.white)),
+      floatingActionButton: _rolUsuario == 'observer' ? null : FloatingActionButton(onPressed: () => _mostrarMenuOpciones(context), backgroundColor: Colors.teal, child: const Icon(Icons.add, color: Colors.white)),
     );
   }
 }

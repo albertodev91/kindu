@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 // Importamos la clase Gasto desde tu pestaña de finanzas
 import '../screens/finance_tab.dart'; 
 import '../screens/calendar_tab.dart'; // Importamos Evento y EstadoEvento
+import '../screens/baul_tab.dart'; // Importamos Documento
 
 class PdfService {
   static final PdfService _instancia = PdfService._internal();
@@ -516,6 +517,90 @@ class PdfService {
     } catch (e) {
       if (Navigator.canPop(context)) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al generar Calendario: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  /// Exporta el Informe de Auditoría y Bóveda Documental
+  Future<void> exportarInformeBoveda(BuildContext context, List<Documento> documentos, List<String> auditoria) async {
+    showDialog(
+      context: context, 
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Generando informe de bóveda...")]),
+      ),
+    );
+
+    try {
+      final pdf = pw.Document();
+      final fuenteNormal = await PdfGoogleFonts.robotoRegular();
+      final fuenteNegrita = await PdfGoogleFonts.robotoBold();
+
+      final ahora = DateTime.now();
+      final fechaFirma = '${ahora.day.toString().padLeft(2, '0')}/${ahora.month.toString().padLeft(2, '0')}/${ahora.year}';
+      final horaFirma = '${ahora.hour.toString().padLeft(2, '0')}:${ahora.minute.toString().padLeft(2, '0')}';
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(40),
+          theme: pw.ThemeData.withFont(base: fuenteNormal, bold: fuenteNegrita),
+          footer: (pw.Context context) {
+            return pw.Container(
+              alignment: pw.Alignment.centerRight,
+              margin: const pw.EdgeInsets.only(top: 10),
+              child: pw.Column(children: [pw.Divider(), pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Kindu - Auditoría Documental', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)), pw.Text('Página ${context.pageNumber} de ${context.pagesCount}', style: pw.TextStyle(fontSize: 10, color: PdfColors.blueGrey, fontWeight: pw.FontWeight.bold))])])
+            );
+          },
+          build: (pw.Context context) {
+            return [
+              pw.Header(level: 0, child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('INFORME DE AUDITORÍA Y BÓVEDA', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.teal)), pw.Text('Kindu App', style: pw.TextStyle(fontSize: 16, color: PdfColors.grey700))])),
+              pw.SizedBox(height: 5),
+              pw.Text('DOCUMENTAL Y FORENSE', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+              pw.Text('Fecha de emisión: $fechaFirma a las $horaFirma', style: const pw.TextStyle(fontSize: 10)),
+              pw.SizedBox(height: 20),
+
+              // SECCIÓN 1: INVENTARIO DE DOCUMENTOS
+              pw.Text('INVENTARIO DE DOCUMENTOS CUSTODIADOS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 10),
+              if (documentos.isEmpty)
+                pw.Container(padding: const pw.EdgeInsets.all(20), alignment: pw.Alignment.center, child: pw.Text('La bóveda está vacía actualmente.', style: const pw.TextStyle(color: PdfColors.grey)))
+              else
+                pw.TableHelper.fromTextArray(
+                  headers: ['Título', 'Categoría', 'Subido', 'Caducidad', 'Páginas'],
+                  data: documentos.map((d) {
+                    final subido = '${d.fechaSubida.day}/${d.fechaSubida.month}/${d.fechaSubida.year}';
+                    String caduca = '-';
+                    if (d.fechaCaducidad != null) caduca = '${d.fechaCaducidad!.day}/${d.fechaCaducidad!.month}/${d.fechaCaducidad!.year}';
+                    return [d.titulo, d.categoria, subido, caduca, '${d.rutasArchivos.length}'];
+                  }).toList(),
+                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 10),
+                  headerDecoration: const pw.BoxDecoration(color: PdfColors.teal),
+                  cellStyle: const pw.TextStyle(fontSize: 8),
+                  rowDecoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300))),
+                  cellAlignment: pw.Alignment.centerLeft,
+                ),
+
+              // SECCIÓN 2: LIBRO DE ACTAS
+              pw.SizedBox(height: 30),
+              pw.Container(
+                width: double.infinity, padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400), color: PdfColors.grey100),
+                child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                    pw.Text('LIBRO DE ACTAS (TRAZABILIDAD FORENSE)', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
+                    pw.Divider(color: PdfColors.grey400),
+                    if (auditoria.isEmpty) pw.Text("No se han registrado movimientos forenses ni alteraciones.", style: pw.TextStyle(color: PdfColors.grey700, fontStyle: pw.FontStyle.italic, fontSize: 10))
+                    else ...auditoria.map((log) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 4), child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [pw.Text('• ', style: pw.TextStyle(color: PdfColors.black, fontWeight: pw.FontWeight.bold, fontSize: 9)), pw.Expanded(child: pw.Text(log, style: const pw.TextStyle(fontSize: 9)))]))).toList()
+                ])
+              ),
+            ];
+          }
+        )
+      );
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      await Printing.sharePdf(bytes: await pdf.save(), filename: 'Kindu_Boveda_${ahora.millisecondsSinceEpoch}.pdf');
+    } catch (e) {
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al generar PDF: $e'), backgroundColor: Colors.red));
     }
   }
 
