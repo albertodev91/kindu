@@ -1,4 +1,24 @@
 import 'package:flutter/material.dart';
+import 'calendar_tab.dart'; // Para acceder a registroAuditoriaGlobal
+
+// 1. CLASE MODELO AVISO
+class AvisoUsuario {
+  final String id;
+  final String titulo;
+  final String descripcion;
+  final String tipo;
+  final DateTime fechaCreacion;
+  bool enterado;
+
+  AvisoUsuario({
+    required this.id,
+    required this.titulo,
+    required this.descripcion,
+    required this.tipo,
+    required this.fechaCreacion,
+    this.enterado = false,
+  });
+}
 
 class AvisosTab extends StatefulWidget {
   const AvisosTab({super.key});
@@ -9,9 +29,21 @@ class AvisosTab extends StatefulWidget {
 
 class _AvisosTabState extends State<AvisosTab> {
   // LISTA REAL DE AVISOS
-  List<Map<String, dynamic>> avisos = [
-    {'titulo': 'Aviso Escolar', 'desc': 'Reunión de tutoría trimestral.', 'tipo': 'Escolar'},
-  ];
+  List<AvisoUsuario> avisos = [];
+
+  @override
+  void initState() {
+    super.initState();
+    // Inyectar aviso de prueba
+    avisos.add(AvisoUsuario(
+      id: 'AVISO-001',
+      titulo: 'Aviso Escolar',
+      descripcion: 'Reunión de tutoría trimestral.',
+      tipo: 'Escolar',
+      fechaCreacion: DateTime.now(),
+      enterado: false
+    ));
+  }
 
   void _abrirFormularioAviso(BuildContext context) {
     String titulo = '';
@@ -70,7 +102,16 @@ class _AvisosTabState extends State<AvisosTab> {
                         if (titulo.isNotEmpty) {
                           // AÑADE EL AVISO A LA LISTA REAL Y ACTUALIZA LA PANTALLA
                           setState(() {
-                            avisos.insert(0, {'titulo': titulo, 'desc': descripcion, 'tipo': tipoSeleccionado});
+                            avisos.insert(0, AvisoUsuario(
+                              id: 'AVISO-${DateTime.now().millisecondsSinceEpoch}',
+                              titulo: titulo,
+                              descripcion: descripcion,
+                              tipo: tipoSeleccionado,
+                              fechaCreacion: DateTime.now(),
+                              enterado: false
+                            ));
+                            // Log Forense
+                            registroAuditoriaGlobal.add("📝 Aviso: El usuario creó un aviso $tipoSeleccionado titulado '$titulo'.");
                           });
                           Navigator.pop(context);
                         }
@@ -116,18 +157,40 @@ class _AvisosTabState extends State<AvisosTab> {
             );
           }
           final aviso = avisos[index - 1];
+          // 2. FECHAS EN LA UI
+          String fechaStr = '${aviso.fechaCreacion.day}/${aviso.fechaCreacion.month}/${aviso.fechaCreacion.year} ${aviso.fechaCreacion.hour}:${aviso.fechaCreacion.minute.toString().padLeft(2,'0')}';
+
           return Card(
             elevation: 3, margin: const EdgeInsets.only(bottom: 15),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: ListTile(
               contentPadding: const EdgeInsets.all(15),
               leading: CircleAvatar(
-                backgroundColor: _getColor(aviso['tipo']).withOpacity(0.1),
-                child: Icon(_getIcono(aviso['tipo']), color: _getColor(aviso['tipo'])),
+                backgroundColor: _getColor(aviso.tipo).withOpacity(0.1),
+                child: Icon(_getIcono(aviso.tipo), color: _getColor(aviso.tipo)),
               ),
-              title: Text(aviso['titulo'], style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Padding(padding: const EdgeInsets.only(top: 8.0), child: Text(aviso['desc'])),
-              trailing: const Icon(Icons.push_pin_outlined, size: 20, color: Colors.grey),
+              title: Text(aviso.titulo, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(aviso.descripcion)),
+                  const SizedBox(height: 5),
+                  Text(fechaStr, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                ],
+              ),
+              // 3. ACUSE DE RECIBO (DOBLE CHECK)
+              trailing: IconButton(
+                icon: Icon(Icons.done_all, color: aviso.enterado ? Colors.green : Colors.grey),
+                tooltip: aviso.enterado ? 'Confirmado y Leído' : 'Marcar como Enterado',
+                onPressed: aviso.enterado ? null : () {
+                  setState(() {
+                    aviso.enterado = true;
+                    // Log Forense de Lectura
+                    registroAuditoriaGlobal.add("🔔 Aviso: El usuario confirmó lectura del aviso '${aviso.titulo}'.");
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Confirmación de lectura registrada.'), backgroundColor: Colors.green));
+                },
+              ),
             ),
           );
         },
